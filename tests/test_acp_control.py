@@ -11,7 +11,7 @@ import numpy as np
 
 from acp import ACP
 from conformally_robust_controller import ConformallyRobustController
-from main_robot_2d import main as online_main
+from main_robot_2d_crc import main as online_main
 from robot_2d_motion_mdp import Robot2DMotionMDP
 
 
