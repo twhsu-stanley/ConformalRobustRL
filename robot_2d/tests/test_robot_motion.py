@@ -5,6 +5,8 @@ import io
 import os
 import pickle
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -14,6 +16,21 @@ from gymnasium.utils.env_checker import check_env
 from robot_2d.main_robot_2d import main as single_main
 from robot_2d.main_robot_2d_online import main as online_main
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+
+
+class ScriptImportTests(unittest.TestCase):
+    def test_direct_script_imports_work_outside_the_repository(self):
+        script_directory = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory(prefix="robot_script_imports_") as directory:
+            for name in ("main_robot_2d.py", "main_robot_2d_online.py", "plot_eval_returns.py"):
+                with self.subTest(script=name):
+                    script = script_directory / name
+                    code = f"import runpy; runpy.run_path({str(script)!r})"
+                    result = subprocess.run(
+                        [sys.executable, "-I", "-B", "-c", code], cwd=directory,
+                        capture_output=True, text=True, timeout=30,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
 
 
 class RobotMotionModelTests(unittest.TestCase):

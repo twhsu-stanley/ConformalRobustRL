@@ -52,6 +52,9 @@ Run Algorithm 1 alone, with fixed `R,C`, using:
 python -m robot_2d.main_robot_2d
 ```
 
+The robot main scripts and plotter also support direct execution, for example
+`python robot_2d/main_robot_2d.py`, including an editor's Run Python File action.
+
 This script constructs a deterministic nominal `Robot2DMotionMDP` with every
 constructor argument specified in `main()`. It trains from a zero Q-table and
 defaults to one run. Set `n_trials` to repeat independent training runs with the

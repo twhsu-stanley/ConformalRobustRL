@@ -1,9 +1,13 @@
 """Run Algorithm 2 with fresh robust Q-learning for every deployment episode."""
 
 import pickle
+import sys
 from pathlib import Path
 
 import numpy as np
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP

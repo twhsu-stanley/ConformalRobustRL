@@ -1,9 +1,13 @@
 """Run Algorithm 1 at fixed R,C and save initial-state value learning curves."""
 
 import pickle
+import sys
 from pathlib import Path
 
 import numpy as np
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
@@ -46,4 +50,16 @@ def main(
 
 
 if __name__ == "__main__":
-    main()
+    # Fix C = 1.0, compare different R values
+    main(R=0.0, C=1.0)
+
+    main(R=0.1, C=1.0)
+
+    main(R=0.2, C=1.0)
+
+    # Fix R = 0.2, compare different C values
+    main(R=0.2, C=0.0)
+    
+    main(R=0.2, C=1.0)
+    
+    main(R=0.2, C=1.5)
