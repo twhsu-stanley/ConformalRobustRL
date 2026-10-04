@@ -1,32 +1,19 @@
-"""Behavioral checks for the robot model and localized robust Q-learning."""
+"""Behavioral checks for the 2-D robot MDP and robot experiment runners."""
 
+from contextlib import redirect_stdout
+import io
+import os
+import pickle
+from pathlib import Path
+import tempfile
 import unittest
 
-import gymnasium as gym
 import numpy as np
 from gymnasium.utils.env_checker import check_env
 
-from robot_2d_motion_mdp import Robot2DMotionMDP
-from Tabular_Agent import Tabular_Agent
-
-
-def reference_q(mdp, gamma, R, C):
-    """Synchronous robust value iteration, independent of the TD training loop."""
-    values = np.zeros(mdp.n_state)
-    for _ in range(2000):
-        Q = np.zeros((mdp.n_state, 4))
-        for state in mdp.trainable_states:
-            for action in range(4):
-                nominal = mdp.nominal_next_state(state, action)
-                candidates = mdp.localized_uncertainty_states(state, action, C)
-                worst_value = np.min(values[candidates])
-                continuation = (1 - R) * values[nominal] + R * worst_value
-                Q[state, action] = mdp.reward(state, action) + gamma * continuation
-        updated = np.max(Q, axis=1)
-        if np.max(np.abs(updated - values)) < 1e-12:
-            return Q
-        values = updated
-    raise AssertionError("Reference value iteration did not converge.")
+from robot_2d.main_robot_2d import main as single_main
+from robot_2d.main_robot_2d_online import main as online_main
+from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 class RobotMotionModelTests(unittest.TestCase):
@@ -154,63 +141,63 @@ class RobotMotionModelTests(unittest.TestCase):
             np.testing.assert_allclose(left_step[4]["position"], right_step[4]["position"])
 
 
-class RobustQLearningTests(unittest.TestCase):
-    def small_mdp(self):
-        return Robot2DMotionMDP(x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0)
+class SingleRunnerTests(unittest.TestCase):
+    def test_runner_saves_fixed_R_C_curves_without_extra_files(self):
+        with tempfile.TemporaryDirectory(prefix="robot_motion_single_") as directory:
+            root = Path(directory)
+            previous_directory = Path.cwd()
+            try:
+                os.chdir(root)
+                for R, C, n_trials in ((0.15, 1.2, 1), (0.2, 1.3, 2)):
+                    with self.subTest(R=R, C=C, n_trials=n_trials):
+                        with redirect_stdout(io.StringIO()) as output:
+                            curves = single_main(
+                                R=R, C=C, training_episodes=20, n_trials=n_trials, horizon=5,
+                            )
+                        filename = root / f"robot_2d_R{R}_C{C}.pkl"
+                        with filename.open("rb") as file:
+                            saved_curves = pickle.load(file)
+                        self.assertEqual(saved_curves, curves)
+                        self.assertEqual(len(saved_curves), n_trials)
+                        self.assertIn(str(filename), output.getvalue())
+                        self.assertTrue(all(curve[0] == 0 for curve in saved_curves))
+                        self.assertTrue(all(len(curve) > 1 for curve in saved_curves))
+                self.assertEqual(len(list(root.rglob("*.pkl"))), 2)
+                self.assertFalse(list(root.rglob("*.npz")))
+                self.assertFalse(list(root.rglob("*.json")))
+            finally:
+                os.chdir(previous_directory)
 
-    def test_robust_target_and_limiting_cases(self):
-        mdp = self.small_mdp()
-        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
-        values = np.array((0.4, 0.8, 0.2, 0.0))
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values), 0.1 + 0.9 * 0.75 * 0.8)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, R=0), 0.82)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, C=0), 0.82)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, R=1, C=np.inf), 0.1)
 
-    def test_training_matches_reference_and_resets_initialization(self):
-        mdp = self.small_mdp()
-        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.2, C=0.6, seed=2)
-        agent.Q.fill(99)
-        Q, policy = agent.Robust_Q_learning(2000, record_every=100)
-        oracle = reference_q(mdp, 0.9, 0.2, 0.6)
-        np.testing.assert_allclose(Q, oracle, atol=1e-6)
-        self.assertAlmostEqual(np.max(Q[0]), 0.72, places=6)
-        self.assertEqual(agent.evaluation_return[0], 0)
-        self.assertEqual(agent.training_diagnostics["unvisited_pairs"], 0)
-        self.assertLess(agent.training_diagnostics["bellman_residual"], 1e-6)
-        self.assertEqual(policy.shape, (4,))
-        np.testing.assert_array_equal(Q[mdp.terminal_mask], 0)
-        Q.fill(-10)
-        self.assertTrue(np.all(agent.Q >= 0))
-
-    def test_R_zero_and_C_zero_recover_nominal_learning(self):
-        mdp = self.small_mdp()
-        standard = Tabular_Agent(mdp.clone(nominal=True), 0.9, 0.5, R=0, seed=4)
-        radius_zero = Tabular_Agent(mdp.clone(nominal=True), 0.9, 0.5, R=0.8, C=0, seed=4)
-        left, _ = standard.Robust_Q_learning(300)
-        right, _ = radius_zero.Robust_Q_learning(300)
-        np.testing.assert_allclose(left, right, atol=1e-12)
-
-    def test_training_rejects_uncertain_simulator(self):
-        mdp = Robot2DMotionMDP(noise_probability=0.1)
-        with self.assertRaises(ValueError):
-            Tabular_Agent(mdp, 0.9, 0.5).Robust_Q_learning(1)
-
-    def test_exploring_starts_cover_every_nonterminal_pair_in_one_sweep(self):
-        mdp = Robot2DMotionMDP(max_episode_steps=2)
-        n_pairs = len(mdp.trainable_states) * 4
-        agent = Tabular_Agent(mdp, 0.95, 0.5, seed=9)
-        agent.Robust_Q_learning(n_pairs, record_every=100)
-        self.assertTrue(np.all(agent.visit_counts[~mdp.terminal_mask] >= 1))
-
-    def test_frozenlake_fixed_parameter_api_remains_usable(self):
-        env = gym.make("FrozenLake-v1", is_slippery=False, max_episode_steps=20)
-        agent = Tabular_Agent(env, 0.95, 0.5, R=0.1, C=1, seed=1)
-        Q, policy = agent.Robust_Q_learning(5)
-        self.assertEqual(Q.shape, (16, 4))
-        self.assertEqual(policy.shape, (16,))
-        env.close()
-
+class OnlineRunnerTests(unittest.TestCase):
+    def test_runner_saves_single_and_multiple_episode_results_without_MDP_JSON(self):
+        with tempfile.TemporaryDirectory(prefix="robot_motion_tests_") as directory:
+            root = Path(directory)
+            for n_episodes in (1, 2):
+                with self.subTest(n_episodes=n_episodes):
+                    output_dir = root / str(n_episodes)
+                    with redirect_stdout(io.StringIO()):
+                        controller = online_main(
+                            training_episodes=10, horizon=5, n_episodes=n_episodes,
+                            pilot_episodes=2, save_plots=False, output_dir=output_dir,
+                        )
+                    with (output_dir / "results.pkl").open("rb") as file:
+                        results = pickle.load(file)
+                    history = results["history"]
+                    self.assertEqual(len(history), n_episodes)
+                    self.assertEqual(history[-1]["transition_count"], 5 * n_episodes)
+                    self.assertEqual(history[0]["R_used"], 0.1)
+                    self.assertTrue(
+                        all(record["training"]["zero_initialized"] for record in history)
+                    )
+                    self.assertEqual(results["final_R"], controller.R_estimate)
+                    self.assertEqual(results["final_delta"], controller.calibrator.delta)
+                    with np.load(output_dir / "final_policy.npz") as saved:
+                        self.assertEqual(saved["Q"].shape, (64, 4))
+                        self.assertEqual(saved["policy"].shape, (64,))
+                        np.testing.assert_array_equal(saved["Q"], controller.Q)
+            self.assertFalse(list(root.rglob("*.json")))
 
 if __name__ == "__main__":
     unittest.main()
+

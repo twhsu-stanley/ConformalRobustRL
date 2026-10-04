@@ -1,6 +1,6 @@
 # Conformally robust 2-D robot motion
 
-`Robot2DMotionMDP` in `robot_2d_motion_mdp.py` replaces FrozenLake for the robot
+`Robot2DMotionMDP` in `robot_2d/robot_2d_motion_mdp.py` replaces FrozenLake for the robot
 example. It uses an 8-by-8 grid over `[0, x_max] x [0, y_max]`, sparse obstacle
 cells, and four commands: `0: +x`, `1: -x`, `2: +y`, `3: -y`. Grid cells are
 specified as `(ix, iy)`; physical positions are `(x, y)`.
@@ -12,7 +12,7 @@ as `.\.venv\Scripts\python.exe` in place of `python` in the commands below.
 ## Run Algorithms 1 and 2
 
 ```powershell
-python main_conformal_robust_robot_motion.py
+python -m robot_2d.main_robot_2d_online
 ```
 
 `ConformallyRobustController` creates independent nominal and deployment instances.
@@ -32,7 +32,7 @@ disturbance, or episode mode. Training and experiment settings are explicit keyw
 arguments of `main()`; there is no command-line parser. For example:
 
 ```python
-from main_conformal_robust_robot_motion import main
+from robot_2d.main_robot_2d_online import main
 
 controller = main(n_episodes=10, training_episodes=2000, save_plots=False)
 ```
@@ -46,20 +46,32 @@ Algorithm 1 from zero, deploy for `horizon` transitions, and update uncertainty.
 
 ## Fixed uncertainty: Algorithm 1
 
-Fixed-`R,C` training uses the same `Tabular_Agent.Robust_Q_learning()` method called
-by Algorithm 2. It does not need another main script:
+Run Algorithm 1 alone, with fixed `R,C`, using:
+
+```powershell
+python -m robot_2d.main_robot_2d
+```
+
+This script constructs a deterministic nominal `Robot2DMotionMDP` with every
+constructor argument specified in `main()`. It trains from a zero Q-table and
+defaults to one run. Set `n_trials` to repeat independent training runs with the
+same fixed uncertainty parameters:
 
 ```python
-from robot_2d_motion_mdp import Robot2DMotionMDP
-from Tabular_Agent import Tabular_Agent
+from robot_2d.main_robot_2d import main
 
-nominal_mdp = Robot2DMotionMDP(noise_probability=0.0, noise_radius=0.0, seed=7)
-agent = Tabular_Agent(
-    nominal_mdp, gamma=0.95, lr_init=0.5, step_start_decay_lr=100000,
-    epsilon_lb=0.1, epsilon_decay_rate=0.995, R=0.15, C=1.2, seed=7,
-)
-Q, policy = agent.Robust_Q_learning(n_episodes=2000)
+curves = main(R=0.15, C=1.2, training_episodes=2000, n_trials=30)
 ```
+
+Results go to `robot_2d_R{R}_C{C}.pkl`, relative to the working directory.
+The script prints the full saved path. The file
+`robot_2d_R0.15_C1.2.pkl` contains a list of return curves, one per trial,
+matching the original FrozenLake pickle format. Each curve starts at zero and
+records `max_a Q(start, a)` after every training transition; its index is the
+cumulative training step. Load it with `pickle.load()` and pass it directly to
+`plot_evaluation_return()` or `calc_evaluation_return_mean_std()` in `utils_tabular.py`.
+Algorithm 1 uses the nominal simulator; the fixed
+`R,C` affect the robust Bellman update. This runner has no ACP or controller dependency.
 
 ## Modeling conventions
 
@@ -100,7 +112,12 @@ Q, policy = agent.Robust_Q_learning(n_episodes=2000)
 
 ```powershell
 python -B -m unittest discover -s tests -v
+python -B -m unittest discover -s robot_2d/tests -v
 ```
+
+General ACP, controller, and tabular Q-learning tests are in `tests/`.
+Robot MDP and robot runner tests are in `robot_2d/tests/`. Run both commands from
+the repository root to check the complete suite.
 
 Checks include Gymnasium compatibility, geometry, rewards, uncertainty support,
 robust value-iteration comparisons, limiting cases, calibration order statistics,

@@ -6,7 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
-from robot_2d_motion_mdp import Robot2DMotionMDP
+from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 def main(

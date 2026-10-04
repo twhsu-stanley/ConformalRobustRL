@@ -1,18 +1,12 @@
-"""Coverage bookkeeping, controller lifecycle, and runner integration checks."""
+"""General ACP bookkeeping and conformally robust controller lifecycle checks."""
 
-from contextlib import redirect_stdout
-import io
-import pickle
-from pathlib import Path
-import tempfile
 import unittest
 
 import numpy as np
 
 from acp import ACP
 from conformally_robust_controller import ConformallyRobustController
-from main_robot_2d_crc import main as online_main
-from robot_2d_motion_mdp import Robot2DMotionMDP
+from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 class ACPTests(unittest.TestCase):
@@ -126,37 +120,6 @@ class ControllerTests(unittest.TestCase):
         np.testing.assert_array_equal(left["states"], right["states"])
         np.testing.assert_allclose(left["positions"], right["positions"])
         np.testing.assert_allclose(first.Q, second.Q)
-
-
-class RunnerIntegrationTests(unittest.TestCase):
-    def test_runner_saves_single_and_multiple_episode_results_without_MDP_JSON(self):
-        with tempfile.TemporaryDirectory(prefix="robot_motion_tests_") as directory:
-            root = Path(directory)
-            for n_episodes in (1, 2):
-                with self.subTest(n_episodes=n_episodes):
-                    output_dir = root / str(n_episodes)
-                    with redirect_stdout(io.StringIO()):
-                        controller = online_main(
-                            training_episodes=10, horizon=5, n_episodes=n_episodes,
-                            pilot_episodes=2, save_plots=False, output_dir=output_dir,
-                        )
-                    with (output_dir / "results.pkl").open("rb") as file:
-                        results = pickle.load(file)
-                    history = results["history"]
-                    self.assertEqual(len(history), n_episodes)
-                    self.assertEqual(history[-1]["transition_count"], 5 * n_episodes)
-                    self.assertEqual(history[0]["R_used"], 0.1)
-                    self.assertTrue(
-                        all(record["training"]["zero_initialized"] for record in history)
-                    )
-                    self.assertEqual(results["final_R"], controller.R_estimate)
-                    self.assertEqual(results["final_delta"], controller.calibrator.delta)
-                    with np.load(output_dir / "final_policy.npz") as saved:
-                        self.assertEqual(saved["Q"].shape, (64, 4))
-                        self.assertEqual(saved["policy"].shape, (64,))
-                        np.testing.assert_array_equal(saved["Q"], controller.Q)
-            self.assertFalse(list(root.rglob("*.json")))
-
 
 if __name__ == "__main__":
     unittest.main()
