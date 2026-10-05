@@ -14,7 +14,7 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 def main(
-    *, n_episodes=30, gamma=0.95, horizon=100, training_episodes=2000, initial_R=0.1,
+    *, n_episodes=30, gamma=0.95, horizon=100, training_episodes=4000, initial_R=0.1,
     target_failure=0.1, initial_failure=None, eta=0.01, calibration_window=100,
     pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
     output_dir=None,
@@ -25,7 +25,7 @@ def main(
         x_max=8.0, y_max=8.0, grid_shape=(8, 8),
         obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
         start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
-        noise_probability=0.15, noise_radius=1.2, noise_sampler=None,
+        noise_probability=0.3, noise_radius=1.2, noise_sampler=None,
         max_episode_steps=horizon, episode_mode="fixed_horizon", seed=seed,
     )
     controller = ConformallyRobustController(
@@ -36,7 +36,7 @@ def main(
         pilot_episodes=pilot_episodes, seed=seed,
     )
     if output_dir is None:
-        output_dir = Path(__file__).resolve().parent / "saved_results" / "conformal_robot_motion"
+        output_dir = Path(__file__).resolve().parent / "saved_results" / "online"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for _ in range(n_episodes):
@@ -61,7 +61,7 @@ def main(
     if save_plots:
         import matplotlib
         matplotlib.use("Agg")
-        from utils_tabular import plot_conformal_history, plot_robot_motion
+        from robot_2d.utils import plot_conformal_history, plot_robot_motion
         import matplotlib.pyplot as plt
         fig = plot_conformal_history(controller.history, controller.target_failure)
         fig.savefig(output_dir / "online_uncertainty.png", dpi=160)

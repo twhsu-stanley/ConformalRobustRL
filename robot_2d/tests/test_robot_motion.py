@@ -21,7 +21,7 @@ from robot_2d.main_robot_2d import main as single_main
 from robot_2d.main_robot_2d_online import main as online_main
 from robot_2d.plot_eval_returns import main as plot_saved_returns
 from robot_2d.plot_value_policy import main as plot_saved_policy
-from robot_2d.plot_value_policy import plot_robot_2d_tabular
+from robot_2d.utils import plot_robot_2d_tabular
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
 
@@ -252,7 +252,7 @@ class ResultsDirectoryTests(unittest.TestCase):
                 self.assertTrue(all(path.is_relative_to(saved_dir) for path in files))
                 self.assertFalse(list(working_directory.iterdir()))
                 self.assertTrue(all(path.stat().st_size > 0 for path in files))
-                self.assertTrue((saved_dir / "conformal_robot_motion" / "results.pkl").is_file())
+                self.assertTrue((saved_dir / "online" / "results.pkl").is_file())
             finally:
                 os.chdir(previous_directory)
 

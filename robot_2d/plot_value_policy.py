@@ -10,19 +10,7 @@ import numpy as np
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utils_tabular import plot_robot_motion
-
-
-def plot_robot_2d_tabular(mdp, agent, *, show=True):
-    """Plot V(s)=max_a Q(s,a) and the greedy policy on the physical robot grid."""
-    if agent.Q.shape != (mdp.n_state, mdp.action_space.n):
-        raise ValueError("The agent Q-table must match the MDP state and action spaces.")
-    title = f"Robust Q-Learning for 2-D Robot Motion: R={agent.R}, C={agent.C}"
-    fig = plot_robot_motion(mdp, agent.Q, np.argmax(agent.Q, axis=1), title=title)
-    fig.axes[1].set_title("Greedy policy from learned Q")
-    if show:
-        plt.show()
-    return fig
+from robot_2d.utils import plot_robot_2d_tabular
 
 
 def main(*, R=0.2, C=1.0, trial=0, data_dir=None, show=True):

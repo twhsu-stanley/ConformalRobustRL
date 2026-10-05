@@ -22,7 +22,7 @@ all deployment mismatches; the deviation radius is calibrated from episode maxim
 continuous deviations. Pilot episodes initialize the calibration window and do not
 enter the deployment mismatch counts.
 
-Results are saved under `robot_2d/saved_results/conformal_robot_motion/`, including `results.pkl`
+Results are saved under `robot_2d/saved_results/online/`, including `results.pkl`
 with episode history and calibration scores, and `final_policy.npz` with the Q-table.
 The runner does not save an MDP configuration or JSON files.
 
@@ -88,7 +88,8 @@ and saving a PNG there. `plot_eval_returns.py` also reads and saves its plots in
 Select another combination or trial with:
 
 ```python
-from robot_2d.plot_value_policy import main, plot_robot_2d_tabular
+from robot_2d.plot_value_policy import main
+from robot_2d.utils import plot_robot_2d_tabular
 
 fig = main(R=0.2, C=1.5, trial=0)
 # With MDP and agent objects already available:
@@ -99,6 +100,9 @@ The figure shows `V(s) = max_a Q(s,a)` and the corresponding greedy policy, with
 start, goal, and obstacles marked. Coordinates are physical `(x,y)`, with upward
 positive `y`. Arrows follow the robot action commands; terminal cells have no
 arrows. The plotted policy uses the finite trained Q-table.
+
+General return statistics and learning-curve plots are in `utils_tabular.py`.
+Robot value/policy, trajectory, and deployment-history plots are in `robot_2d/utils.py`.
 
 ## Modeling conventions
 
