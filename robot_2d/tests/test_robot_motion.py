@@ -1,6 +1,6 @@
 """Behavioral checks for the 2-D robot MDP and robot experiment runners."""
 
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stdout
 import io
 import os
 import pickle
@@ -9,20 +9,31 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 import numpy as np
 from gymnasium.utils.env_checker import check_env
 
 from robot_2d.main_robot_2d import main as single_main
 from robot_2d.main_robot_2d_online import main as online_main
+from robot_2d.plot_eval_returns import main as plot_saved_returns
+from robot_2d.plot_value_policy import main as plot_saved_policy
+from robot_2d.plot_value_policy import plot_robot_2d_tabular
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+from Tabular_Agent import Tabular_Agent
 
 
 class ScriptImportTests(unittest.TestCase):
     def test_direct_script_imports_work_outside_the_repository(self):
         script_directory = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="robot_script_imports_") as directory:
-            for name in ("main_robot_2d.py", "main_robot_2d_online.py", "plot_eval_returns.py"):
+            for name in (
+                "main_robot_2d.py", "main_robot_2d_online.py", "plot_eval_returns.py",
+                "plot_value_policy.py",
+            ):
                 with self.subTest(script=name):
                     script = script_directory / name
                     code = f"import runpy; runpy.run_path({str(script)!r})"
@@ -159,19 +170,22 @@ class RobotMotionModelTests(unittest.TestCase):
 
 
 class SingleRunnerTests(unittest.TestCase):
-    def test_runner_saves_fixed_R_C_curves_without_extra_files(self):
+    def test_runner_saves_curves_and_reloadable_MDP_agents_for_every_trial(self):
         with tempfile.TemporaryDirectory(prefix="robot_motion_single_") as directory:
             root = Path(directory)
+            saved_dir = root / "saved_results"
             previous_directory = Path.cwd()
             try:
                 os.chdir(root)
+                self.assertFalse(saved_dir.exists())
                 for R, C, n_trials in ((0.15, 1.2, 1), (0.2, 1.3, 2)):
                     with self.subTest(R=R, C=C, n_trials=n_trials):
                         with redirect_stdout(io.StringIO()) as output:
                             curves = single_main(
                                 R=R, C=C, training_episodes=20, n_trials=n_trials, horizon=5,
+                                output_dir=saved_dir,
                             )
-                        filename = root / f"robot_2d_R{R}_C{C}.pkl"
+                        filename = saved_dir / f"robot_2d_R{R}_C{C}.pkl"
                         with filename.open("rb") as file:
                             saved_curves = pickle.load(file)
                         self.assertEqual(saved_curves, curves)
@@ -179,11 +193,88 @@ class SingleRunnerTests(unittest.TestCase):
                         self.assertIn(str(filename), output.getvalue())
                         self.assertTrue(all(curve[0] == 0 for curve in saved_curves))
                         self.assertTrue(all(len(curve) > 1 for curve in saved_curves))
-                self.assertEqual(len(list(root.rglob("*.pkl"))), 2)
+                        filename = saved_dir / f"robot_2d_R{R}_C{C}_agents.pkl"
+                        with filename.open("rb") as file:
+                            saved = pickle.load(file)
+                        self.assertEqual(len(saved["agents"]), n_trials)
+                        for agent, curve in zip(saved["agents"], saved_curves):
+                            self.assertIs(agent.env, saved["mdp"])
+                            self.assertEqual(agent.R, R)
+                            self.assertEqual(agent.C, C)
+                            start_value = np.max(agent.Q[saved["mdp"].start_state])
+                            self.assertEqual(start_value, curve[-1])
+                            self.assertEqual(len(curve), agent.visit_counts.sum() + 1)
+                        with redirect_stdout(io.StringIO()):
+                            fig = plot_saved_policy(
+                                R=R, C=C, trial=n_trials - 1, data_dir=saved_dir, show=False,
+                            )
+                        plot_name = f"robot_2d_R{R}_C{C}_trial{n_trials}_value_policy.png"
+                        self.assertTrue((saved_dir / plot_name).is_file())
+                        plt.close(fig)
+                self.assertEqual(len(list(root.rglob("*.pkl"))), 4)
+                self.assertFalse(list(root.glob("*.pkl")))
                 self.assertFalse(list(root.rglob("*.npz")))
                 self.assertFalse(list(root.rglob("*.json")))
             finally:
                 os.chdir(previous_directory)
+
+
+class ResultsDirectoryTests(unittest.TestCase):
+    def test_default_results_paths_follow_script_locations_from_an_unrelated_directory(self):
+        with tempfile.TemporaryDirectory(prefix="robot_results_paths_") as directory:
+            root = Path(directory)
+            script_directory = root / "robot_2d"
+            saved_dir = script_directory / "saved_results"
+            working_directory = root / "unrelated"
+            working_directory.mkdir()
+            previous_directory = Path.cwd()
+            try:
+                os.chdir(working_directory)
+                with ExitStack() as stack:
+                    for name in (
+                        "main_robot_2d", "main_robot_2d_online", "plot_eval_returns",
+                        "plot_value_policy",
+                    ):
+                        filename = str(script_directory / f"{name}.py")
+                        stack.enter_context(patch(f"robot_2d.{name}.__file__", filename))
+                    with redirect_stdout(io.StringIO()):
+                        for R, C in ((0.0, 1.0), (0.1, 1.0), (0.2, 1.0), (0.2, 0.0), (0.2, 1.5)):
+                            single_main(R=R, C=C, training_episodes=10, horizon=5)
+                        figures = plot_saved_returns(show=False)
+                        figures.append(plot_saved_policy(show=False))
+                        for figure in figures:
+                            plt.close(figure)
+                        online_main(
+                            n_episodes=1, training_episodes=10, horizon=5, pilot_episodes=2,
+                        )
+                files = [path for path in root.rglob("*") if path.is_file()]
+                self.assertEqual(len(files), 17)
+                self.assertTrue(all(path.is_relative_to(saved_dir) for path in files))
+                self.assertFalse(list(working_directory.iterdir()))
+                self.assertTrue(all(path.stat().st_size > 0 for path in files))
+                self.assertTrue((saved_dir / "conformal_robot_motion" / "results.pkl").is_file())
+            finally:
+                os.chdir(previous_directory)
+
+
+class ValuePolicyPlotTests(unittest.TestCase):
+    def test_plot_uses_physical_coordinates_values_and_nonterminal_policy_arrows(self):
+        from matplotlib.patches import FancyArrow
+        mdp = Robot2DMotionMDP(x_max=4, y_max=2, grid_shape=(2, 2))
+        agent = Tabular_Agent(mdp, gamma=0.95, lr_init=0.5, R=0.2, C=0.6)
+        agent.Q = np.array(((0.1, 0.4, 0.2, 0.3), (0.7, 0.3, 0.2, 0.1),
+                            (0.2, 0.3, 0.9, 0.4), (0, 0, 0, 0)))
+        fig = plot_robot_2d_tabular(mdp, agent, show=False)
+        try:
+            values_axis, policy_axis = fig.axes[:2]
+            np.testing.assert_allclose(values_axis.images[0].get_array(), ((0.4, 0.7), (0.9, 0)))
+            self.assertEqual(tuple(values_axis.images[0].get_extent()), (0, 4, 0, 2))
+            self.assertEqual(policy_axis.get_xlim(), (0, 4))
+            self.assertEqual(policy_axis.get_ylim(), (0, 2))
+            arrows = [patch for patch in policy_axis.patches if isinstance(patch, FancyArrow)]
+            self.assertEqual(len(arrows), 3)
+        finally:
+            plt.close(fig)
 
 
 class OnlineRunnerTests(unittest.TestCase):

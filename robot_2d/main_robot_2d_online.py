@@ -17,7 +17,7 @@ def main(
     *, n_episodes=30, gamma=0.95, horizon=100, training_episodes=2000, initial_R=0.1,
     target_failure=0.1, initial_failure=None, eta=0.01, calibration_window=100,
     pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
-    output_dir="results/conformal_robot_motion",
+    output_dir=None,
 ):
     if not isinstance(n_episodes, (int, np.integer)) or n_episodes < 1:
         raise ValueError("n_episodes must be a positive integer.")
@@ -35,6 +35,8 @@ def main(
         calibration_scores=calibration_scores, calibration_window=calibration_window,
         pilot_episodes=pilot_episodes, seed=seed,
     )
+    if output_dir is None:
+        output_dir = Path(__file__).resolve().parent / "saved_results" / "conformal_robot_motion"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for _ in range(n_episodes):

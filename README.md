@@ -22,7 +22,7 @@ all deployment mismatches; the deviation radius is calibrated from episode maxim
 continuous deviations. Pilot episodes initialize the calibration window and do not
 enter the deployment mismatch counts.
 
-Results are saved under `results/conformal_robot_motion/`, including `results.pkl`
+Results are saved under `robot_2d/saved_results/conformal_robot_motion/`, including `results.pkl`
 with episode history and calibration scores, and `final_policy.npz` with the Q-table.
 The runner does not save an MDP configuration or JSON files.
 
@@ -66,8 +66,9 @@ from robot_2d.main_robot_2d import main
 curves = main(R=0.15, C=1.2, training_episodes=2000, n_trials=30)
 ```
 
-Results go to `robot_2d_R{R}_C{C}.pkl`, relative to the working directory.
-The script prints the full saved path. The file
+Results go to `robot_2d/saved_results/robot_2d_R{R}_C{C}.pkl` in this repository.
+The default directory is resolved from the script location, independently of the
+working directory. Training creates it automatically and prints the full saved path. The file
 `robot_2d_R0.15_C1.2.pkl` contains a list of return curves, one per trial,
 matching the original FrozenLake pickle format. Each curve starts at zero and
 records `max_a Q(start, a)` after every training transition; its index is the
@@ -75,6 +76,29 @@ cumulative training step. Load it with `pickle.load()` and pass it directly to
 `plot_evaluation_return()` or `calc_evaluation_return_mean_std()` in `utils_tabular.py`.
 Algorithm 1 uses the nominal simulator; the fixed
 `R,C` affect the robust Bellman update. This runner has no ACP or controller dependency.
+
+Each training call also saves `robot_2d_R{R}_C{C}_agents.pkl` in that folder, containing the MDP
+and a list of trained agents, one per trial. Existing return files remain lists
+of curves. Rerun training to produce the companion files for older experiments.
+
+To plot saved values and policies, run `python -m robot_2d.plot_value_policy`.
+It defaults to `R=0.2`, `C=1.0`, and the first trial, reading from `robot_2d/saved_results`
+and saving a PNG there. `plot_eval_returns.py` also reads and saves its plots in
+`robot_2d/saved_results`. Both plotters resolve this default from their script location.
+Select another combination or trial with:
+
+```python
+from robot_2d.plot_value_policy import main, plot_robot_2d_tabular
+
+fig = main(R=0.2, C=1.5, trial=0)
+# With MDP and agent objects already available:
+# fig = plot_robot_2d_tabular(mdp, agent)
+```
+
+The figure shows `V(s) = max_a Q(s,a)` and the corresponding greedy policy, with
+start, goal, and obstacles marked. Coordinates are physical `(x,y)`, with upward
+positive `y`. Arrows follow the robot action commands; terminal cells have no
+arrows. The plotted policy uses the finite trained Q-table.
 
 ## Modeling conventions
 

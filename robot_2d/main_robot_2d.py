@@ -15,10 +15,14 @@ from Tabular_Agent import Tabular_Agent
 
 def main(
     *, R=0.15, C=1.2, gamma=0.95, training_episodes=2000, n_trials=1,
-    horizon=100, seed=7,
+    horizon=100, seed=7, output_dir=None,
 ):
     if not isinstance(n_trials, (int, np.integer)) or n_trials < 1:
         raise ValueError("n_trials must be a positive integer.")
+    if output_dir is None:
+        output_dir = Path(__file__).resolve().parent / "saved_results"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
     mdp = Robot2DMotionMDP(
         x_max=8.0, y_max=8.0, grid_shape=(8, 8),
         obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
@@ -27,6 +31,7 @@ def main(
         max_episode_steps=horizon, episode_mode="episodic", seed=seed,
     )
     evaluation_return = []
+    agents = []
     for trial in range(n_trials):
         agent = Tabular_Agent(
             mdp, gamma=gamma, lr_init=0.5, step_start_decay_lr=100000,
@@ -36,16 +41,23 @@ def main(
         agent.Robust_Q_learning(training_episodes, record_every=1)
         # Match the FrozenLake learning curves: V(start), recorded at every transition.
         evaluation_return.append(agent.evaluation_return.copy())
+        agents.append(agent)
         print(
             f"Trial {trial + 1}: R={R}, C={C}, "
             f"V(start)={evaluation_return[-1][-1]:.4f}, "
             f"Bellman residual={agent.training_diagnostics['bellman_residual']:.3g}",
         )
 
-    filename = f"robot_2d_R{R}_C{C}.pkl"
+    filename = output_dir / f"robot_2d_R{R}_C{C}.pkl"
     with open(filename, "wb") as f:
         pickle.dump(evaluation_return, f)
     print(f"Saved evaluation return to {Path(filename).resolve()}")
+    
+    filename = output_dir / f"robot_2d_R{R}_C{C}_agents.pkl"
+    with open(filename, "wb") as f:
+        pickle.dump({"mdp": mdp, "agents": agents}, f)
+    print(f"Saved MDP and trained agents to {Path(filename).resolve()}")
+    
     return evaluation_return
 
 
