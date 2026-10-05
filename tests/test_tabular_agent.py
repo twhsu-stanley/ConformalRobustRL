@@ -45,7 +45,7 @@ class RobustQLearningTests(unittest.TestCase):
         mdp = self.small_mdp()
         agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.2, C=0.6, seed=2)
         agent.Q.fill(99)
-        Q, policy = agent.Robust_Q_learning(2000, record_every=100)
+        Q, policy = agent.robust_q_learning(2000, record_every=100)
         oracle = reference_q(mdp, 0.9, 0.2, 0.6)
         np.testing.assert_allclose(Q, oracle, atol=1e-6)
         self.assertAlmostEqual(np.max(Q[0]), 0.72, places=6)
@@ -61,26 +61,26 @@ class RobustQLearningTests(unittest.TestCase):
         mdp = self.small_mdp()
         standard = Tabular_Agent(mdp.clone(nominal=True), 0.9, 0.5, R=0, seed=4)
         radius_zero = Tabular_Agent(mdp.clone(nominal=True), 0.9, 0.5, R=0.8, C=0, seed=4)
-        left, _ = standard.Robust_Q_learning(300)
-        right, _ = radius_zero.Robust_Q_learning(300)
+        left, _ = standard.robust_q_learning(300)
+        right, _ = radius_zero.robust_q_learning(300)
         np.testing.assert_allclose(left, right, atol=1e-12)
 
     def test_training_rejects_uncertain_simulator(self):
         mdp = Robot2DMotionMDP(noise_probability=0.1)
         with self.assertRaises(ValueError):
-            Tabular_Agent(mdp, 0.9, 0.5).Robust_Q_learning(1)
+            Tabular_Agent(mdp, 0.9, 0.5).robust_q_learning(1)
 
     def test_exploring_starts_cover_every_nonterminal_pair_in_one_sweep(self):
         mdp = Robot2DMotionMDP(max_episode_steps=2)
         n_pairs = len(mdp.trainable_states) * 4
         agent = Tabular_Agent(mdp, 0.95, 0.5, seed=9)
-        agent.Robust_Q_learning(n_pairs, record_every=100)
+        agent.robust_q_learning(n_pairs, record_every=100)
         self.assertTrue(np.all(agent.visit_counts[~mdp.terminal_mask] >= 1))
 
     def test_frozenlake_fixed_parameter_api_remains_usable(self):
         env = gym.make("FrozenLake-v1", is_slippery=False, max_episode_steps=20)
         agent = Tabular_Agent(env, 0.95, 0.5, R=0.1, C=1, seed=1)
-        Q, policy = agent.Robust_Q_learning(5)
+        Q, policy = agent.robust_q_learning(5)
         self.assertEqual(Q.shape, (16, 4))
         self.assertEqual(policy.shape, (16,))
         env.close()

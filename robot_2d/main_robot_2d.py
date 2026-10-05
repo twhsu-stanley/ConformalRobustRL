@@ -14,7 +14,7 @@ from Tabular_Agent import Tabular_Agent
 
 
 def main(
-    *, R=0.15, C=1.2, gamma=0.95, training_episodes=2000, n_trials=1,
+    *, R=0.15, C=1.2, gamma=0.95, training_episodes=5000, n_trials=15,
     horizon=100, seed=7, output_dir=None,
 ):
     if not isinstance(n_trials, (int, np.integer)) or n_trials < 1:
@@ -38,7 +38,7 @@ def main(
             epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
             R=R, C=C, seed=seed + trial,
         )
-        agent.Robust_Q_learning(training_episodes, record_every=1)
+        agent.robust_q_learning(training_episodes, record_every=1)
         # Match the FrozenLake learning curves: V(start), recorded at every transition.
         evaluation_return.append(agent.evaluation_return.copy())
         agents.append(agent)
@@ -65,13 +65,13 @@ if __name__ == "__main__":
     # Fix C = 1.0, compare different R values
     main(R=0.0, C=1.0)
 
-    main(R=0.1, C=1.0)
+    #main(R=0.1, C=1.0)
 
-    main(R=0.2, C=1.0)
+    #main(R=0.2, C=1.0)
 
     # Fix R = 0.2, compare different C values
-    main(R=0.2, C=0.0)
+    #main(R=0.2, C=0.0)
     
-    main(R=0.2, C=1.0)
+    #main(R=0.2, C=1.0)
     
-    main(R=0.2, C=1.5)
+    #main(R=0.2, C=1.5)

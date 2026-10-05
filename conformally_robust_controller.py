@@ -105,7 +105,7 @@ class ConformallyRobustController:
             self.training_env, R=R_used, C=planning_radius, seed=self._next_seed(),
             **self.agent_options,
         )
-        self.Q, self.policy = self.agent.Robust_Q_learning(
+        self.Q, self.policy = self.agent.robust_q_learning(
             self.training_episodes, exploring_starts=True, record_every=100,
         )
         state, info = self.deployment_env.reset(seed=self._next_seed())

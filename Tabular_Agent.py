@@ -132,7 +132,7 @@ class Tabular_Agent:
 
     def Q_learning(self, n_episodes, **kwargs):
         """Ordinary Q-learning is the R=0 special case of the robust update."""
-        return self.Robust_Q_learning(n_episodes, R=0.0, **kwargs)
+        return self.robust_q_learning(n_episodes, R=0.0, **kwargs)
 
     def robust_td_target(self, reward, nominal_next_state, values, R=None, C=None):
         R = self.R if R is None else R
@@ -158,7 +158,7 @@ class Tabular_Agent:
                 residual = max(residual, abs(target - self.Q[state, action]))
         return float(residual)
 
-    def Robust_Q_learning(
+    def robust_q_learning(
         self, n_episodes, *, R=None, C=None, exploring_starts=None, record_every=1,
         verbose=False,
     ):
@@ -295,7 +295,7 @@ class Tabular_Agent:
             C(s,a) = {s_tilde : ||s' - s_tilde|| <= C}.
 
         With probability 1-p, the nominal transition is used. This matches the
-        localized R-C perturbation model used by Robust_Q_learning.
+        localized R-C perturbation model used by robust_q_learning.
         """
         if p is None:
             p = self.R
