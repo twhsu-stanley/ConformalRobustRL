@@ -65,13 +65,13 @@ if __name__ == "__main__":
     # Fix C = 1.0, compare different R values
     main(R=0.0, C=1.0)
 
-    #main(R=0.1, C=1.0)
+    main(R=0.1, C=1.0)
 
-    #main(R=0.2, C=1.0)
+    main(R=0.2, C=1.0)
 
     # Fix R = 0.2, compare different C values
-    #main(R=0.2, C=0.0)
+    main(R=0.2, C=0.0)
     
-    #main(R=0.2, C=1.0)
+    main(R=0.2, C=1.0)
     
-    #main(R=0.2, C=1.5)
+    main(R=0.2, C=1.5)
