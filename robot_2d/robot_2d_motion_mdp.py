@@ -12,12 +12,14 @@ class Robot2DMotionMDP(gym.Env):
 
     Cells are indexed by (ix, iy), with state = ix + nx * iy. Actions 0, 1, 2, 3
     command +x, -x, +y, -y, respectively. Rewards depend on (state, action), even
-    during uncertain deployment. Goal and obstacle cells have zero-valued absorbing
-    dynamics. Fixed-horizon mode executes those dynamics until the horizon ends.
+    during uncertain deployment. Goal and obstacle cells have nominal self-loops.
+    Deployment applies noise at every step, including at the goal. Workspace exits
+    and obstacle landings restart from the pre-action position without an extra step.
+    Outside grid cells share one zero-valued outcome in the finite planning model.
 
     A custom noise_sampler(nominal_position, rng) returns a bounded 2-D deviation.
-    The default sampler mixes zero deviation with uniform noise in a disk. Domain
-    projection and absorbing states can make mismatch probability state dependent.
+    The default sampler mixes zero deviation with uniform noise in a disk.
+    Noise is never projected or resampled. Each deployment records H noisy attempts.
     """
 
     metadata = {"render_modes": []}
@@ -40,7 +42,9 @@ class Robot2DMotionMDP(gym.Env):
         self.nx, self.ny = map(int, shape)
         self.grid_shape = (self.nx, self.ny)
         self.cell_widths = self.bounds / shape
-        self.n_state = self.nx * self.ny
+        self.n_grid_states = self.nx * self.ny
+        self.failure_state = self.n_grid_states
+        self.n_state = self.n_grid_states + 1
         self.observation_space = spaces.Discrete(self.n_state)
         self.action_space = spaces.Discrete(4)
         if episode_mode not in {"episodic", "fixed_horizon"}:
@@ -81,10 +85,10 @@ class Robot2DMotionMDP(gym.Env):
         if self.obstacle_mask[self.goal_cell[1], self.goal_cell[0]]:
             raise ValueError("Goal cannot be an obstacle.")
         self._validate_path()
-        states = np.arange(self.n_state)
+        states = np.arange(self.n_grid_states)
         indices = np.column_stack((states % self.nx, states // self.nx))
-        self.state_coordinates = (indices + 0.5) * self.cell_widths
-        self.terminal_mask = self.obstacle_mask.ravel().copy()
+        self.state_coordinates = np.vstack(((indices + 0.5) * self.cell_widths, [np.nan, np.nan]))
+        self.terminal_mask = np.append(self.obstacle_mask.ravel(), True)
         self.terminal_mask[self.goal_state] = True
         self.trainable_states = np.flatnonzero(~self.terminal_mask)
         self.nominal_transitions = np.zeros((self.n_state, 4), dtype=int)
@@ -124,19 +128,29 @@ class Robot2DMotionMDP(gym.Env):
 
     def state_to_cell(self, state):
         state = self._validate_state(state)
+        if state == self.failure_state:
+            raise ValueError("The workspace-failure state is not a grid cell.")
         return state % self.nx, state // self.nx
 
     def coordinates(self, state):
-        return self.state_coordinates[self._validate_state(state)].copy()
+        state = self._validate_state(state)
+        if state == self.failure_state:
+            raise ValueError("The workspace-failure state has no cell center.")
+        return self.state_coordinates[state].copy()
 
-    def discretize(self, position):
-        """Map positions to cells; an upper outer boundary belongs to the last cell."""
+    def quantize(self, position):
+        """Phi on the uniform grid extended to R^2, using half-open cells."""
         position = np.asarray(position, dtype=float)
         if position.shape != (2,) or not np.all(np.isfinite(position)):
             raise ValueError("A continuous position must be a finite 2-D vector.")
-        if np.any(position < 0) or np.any(position > self.bounds):
-            raise ValueError("Position is outside the bounded state space.")
-        indices = np.minimum((position / self.cell_widths).astype(int), (self.nx - 1, self.ny - 1))
+        return (np.floor(position / self.cell_widths) + 0.5) * self.cell_widths
+
+    def discretize(self, position):
+        """Index Phi(x) for planning; aggregate outside cells into the exit outcome."""
+        center = self.quantize(position)
+        if np.any(center < 0) or np.any(center > self.bounds):
+            return self.failure_state
+        indices = np.rint(center / self.cell_widths - 0.5).astype(int)
         return int(indices[0] + self.nx * indices[1])
 
     def _validate_path(self):
@@ -158,11 +172,12 @@ class Robot2DMotionMDP(gym.Env):
 
     def _build_nominal_model(self):
         for state in range(self.n_state):
+            if self.terminal_mask[state]:
+                self.nominal_transitions[state, :] = state
+                continue
             ix, iy = self.state_to_cell(state)
             for action, (dx, dy) in enumerate(self.ACTION_DIRECTIONS):
                 self.nominal_transitions[state, action] = state
-                if self.terminal_mask[state]:
-                    continue
                 cell = (ix + dx, iy + dy)
                 if not 0 <= cell[0] < self.nx or not 0 <= cell[1] < self.ny:
                     self.boundary_commands[state, action] = True
@@ -191,9 +206,17 @@ class Robot2DMotionMDP(gym.Env):
         nominal_state = self._validate_state(nominal_state)
         if np.isposinf(radius):
             return np.arange(self.n_state)
-        offsets = np.abs(self.state_coordinates - self.state_coordinates[nominal_state])
+        if nominal_state == self.failure_state:
+            return np.array([self.failure_state])
+        center = self.coordinates(nominal_state)
+        offsets = np.abs(self.state_coordinates[:self.n_grid_states] - center)
         distances = np.linalg.norm(np.maximum(offsets - self.cell_widths / 2, 0), axis=1)
-        return np.flatnonzero(distances <= radius + 1e-12)
+        states = np.flatnonzero(distances <= radius + 1e-12)
+        crosses_lower = radius > np.min(center) + 1e-12
+        reaches_upper = radius >= np.min(self.bounds - center) - 1e-12
+        if crosses_lower or reaches_upper:
+            states = np.append(states, self.failure_state)
+        return states
 
     def localized_uncertainty_states(self, state, action, radius):
         return self.localized_states_around(self.nominal_next_state(state, action), radius)
@@ -205,6 +228,8 @@ class Robot2DMotionMDP(gym.Env):
             raise ValueError("Specify either state or position, not both.")
         if "position" in options:
             self.s = self.discretize(options["position"])
+            if self.s == self.failure_state:
+                raise ValueError("An episode must start inside the workspace.")
             self.position = np.asarray(options["position"], dtype=float).copy()
         else:
             self.s = self._validate_state(options.get("state", self.start_state))
@@ -229,18 +254,21 @@ class Robot2DMotionMDP(gym.Env):
         return deviation.astype(float)
 
     def step(self, action):
+        """Observe an attempt, then apply an uncounted restart in fixed-horizon mode.
+
+        The returned state is the next decision state. info retains the attempted
+        position, quantized position, observed state, and original disturbance.
+        """
         if self._episode_finished:
             raise RuntimeError("Episode has ended; call reset before taking another step.")
         action = self._validate_action(action)
         state = self.s
+        source_position = self.position.copy()
         nominal_state = self.nominal_next_state(state, action)
-        nominal_position = self.coordinates(nominal_state)
-        absorbing = bool(self.terminal_mask[state])
-        deviation = np.zeros(2) if absorbing else self._sample_deviation(nominal_position)
-        raw_position = nominal_position + deviation
-        self.position = np.clip(raw_position, 0, self.bounds)
+        nominal_position = self.nominal_next_position(state, action)
+        deviation = self._sample_deviation(nominal_position)
+        self.position = nominal_position + deviation
         self.s = self.discretize(self.position)
-        deviation = self.position - nominal_position
         self.elapsed_steps += 1
         terminal = bool(self.terminal_mask[self.s])
         terminated = terminal and self.episode_mode == "episodic"
@@ -249,16 +277,85 @@ class Robot2DMotionMDP(gym.Env):
         info = {
             "position": self.position.copy(), "nominal_state": nominal_state,
             "nominal_position": nominal_position, "deviation": deviation,
+            "observed_state": self.s, "quantized_position": self.quantize(self.position),
             "deviation_norm": float(np.linalg.norm(deviation)),
             "mismatch": self.s != nominal_state, "goal_reached": self.s == self.goal_state,
-            "collision": bool(self.obstacle_mask.ravel()[self.s]),
-            "boundary_attempt": bool(self.boundary_commands[state, action]),
-            "boundary_violation": bool(
-                np.any(raw_position < 0) or np.any(raw_position > self.bounds)
+            "collision": bool(
+                self.s < self.n_grid_states and self.obstacle_mask.ravel()[self.s]
             ),
-            "absorbing_transition": absorbing,
+            "workspace_exit": self.s == self.failure_state,
+            "boundary_attempt": bool(self.boundary_commands[state, action]),
+            "boundary_violation": self.s == self.failure_state,
         }
+        if self.episode_mode == "fixed_horizon" and (info["collision"] or info["workspace_exit"]):
+            self.s, self.position = state, source_position
         return self.s, self.reward(state, action), terminated, truncated, info
+
+    def deploy_policy(self, policy, gamma, seed=None, start_position=None):
+        """Run a full deployment horizon with a policy table or policy(state) callable.
+
+        Record x'=F(x,a)+Delta before any restart. The next action uses the restored
+        source position after an exit or collision; resets add no recorded step.
+        This routine does not update any controller estimates or calibration.
+        """
+        if self.episode_mode != "fixed_horizon":
+            raise ValueError("Policy deployment requires fixed_horizon mode.")
+        options = None if start_position is None else {"position": start_position}
+        _, info = self.reset(seed=seed, options=options)
+        positions, states = [info["position"].copy()], [self.s]
+        actions, rewards, deviations = [], [], []
+        mismatches, nominal_positions, deviation_vectors = [], [], []
+        source_states, source_positions, quantized_positions = [], [], []
+        collisions, workspace_exits = [], []
+        boundary_attempts, boundary_violations = 0, 0
+        goal_step, collision_step, workspace_exit_step = None, None, None
+        for step in range(self.max_episode_steps):
+            state = self.s
+            source_states.append(state)
+            source_positions.append(self.position.copy())
+            action = int(policy(state) if callable(policy) else policy[state])
+            _, reward, terminated, truncated, info = self.step(action)
+            nominal_positions.append(info["nominal_position"].copy())
+            deviation_vectors.append(info["deviation"].copy())
+            positions.append(info["position"].copy())
+            states.append(info["observed_state"])
+            quantized_positions.append(info["quantized_position"])
+            actions.append(action)
+            rewards.append(float(reward))
+            deviations.append(info["deviation_norm"])
+            mismatches.append(int(info["mismatch"]))
+            collisions.append(info["collision"])
+            workspace_exits.append(info["workspace_exit"])
+            boundary_attempts += int(info["boundary_attempt"])
+            boundary_violations += int(info["boundary_violation"])
+            if info["goal_reached"] and goal_step is None:
+                goal_step = step + 1
+            if info["collision"] and collision_step is None:
+                collision_step = step + 1
+            if info["workspace_exit"] and workspace_exit_step is None:
+                workspace_exit_step = step + 1
+            if step + 1 < self.max_episode_steps and (terminated or truncated):
+                raise RuntimeError("Deployment must execute the full fixed horizon.")
+        return {
+            "states": np.asarray(states), "positions": np.asarray(positions),
+            "source_states": np.asarray(source_states),
+            "source_positions": np.asarray(source_positions),
+            "quantized_positions": np.asarray(quantized_positions),
+            "nominal_positions": np.asarray(nominal_positions), "actions": np.asarray(actions),
+            "deviation_vectors": np.asarray(deviation_vectors),
+            "rewards": np.asarray(rewards), "deviations": np.asarray(deviations),
+            "mismatches": np.asarray(mismatches), "collisions": np.asarray(collisions),
+            "workspace_exits": np.asarray(workspace_exits),
+            "score": max(deviations), "episode_mismatches": sum(mismatches),
+            "collision_count": sum(collisions), "workspace_exit_count": sum(workspace_exits),
+            "discounted_return": float(np.dot(gamma**np.arange(len(rewards)), rewards)),
+            "goal_reached": goal_step is not None, "collision": collision_step is not None,
+            "workspace_exit": workspace_exit_step is not None,
+            "timeout": goal_step is None,
+            "goal_step": goal_step, "collision_step": collision_step,
+            "workspace_exit_step": workspace_exit_step,
+            "boundary_attempts": boundary_attempts, "boundary_violations": boundary_violations,
+        }
 
     def clone(self, *, nominal=False, episode_mode=None, max_episode_steps=None, seed=None):
         """Create an independent rollout instance with the same map and reward function."""

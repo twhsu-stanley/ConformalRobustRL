@@ -4,15 +4,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
+def plot_robot_motion(
+    mdp, Q, policy, trajectory=None, title="Robot motion", *, source_positions=None,
+):
     """Plot values, direction commands, and an optional continuous trajectory."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
     extent = (0, mdp.bounds[0], 0, mdp.bounds[1])
-    values = np.max(Q, axis=1).reshape(mdp.ny, mdp.nx)
+    values = np.max(Q[:mdp.n_grid_states], axis=1).reshape(mdp.ny, mdp.nx)
     image = axes[0].imshow(values, origin="lower", extent=extent, cmap="YlGnBu")
     fig.colorbar(image, ax=axes[0], label="Learned robust value")
     for axis in axes:
-        for state in range(mdp.n_state):
+        for state in range(mdp.n_grid_states):
             ix, iy = mdp.state_to_cell(state)
             color = "0.25" if mdp.obstacle_mask[iy, ix] else "none"
             if state == mdp.start_state:
@@ -42,7 +44,19 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
         )
     if trajectory is not None:
         trajectory = np.asarray(trajectory)
-        axes[1].plot(trajectory[:, 0], trajectory[:, 1], "o-", color="tab:orange", markersize=3)
+        path = trajectory
+        if source_positions is not None:
+            sources = np.asarray(source_positions)
+            breaks = np.full_like(sources, np.nan)
+            path = np.stack((sources, trajectory[1:], breaks), axis=1).reshape(-1, 2)
+        axes[1].plot(path[:, 0], path[:, 1], "o-", color="tab:orange", markersize=3)
+        exits = np.array([mdp.discretize(x) == mdp.failure_state for x in trajectory])
+        if np.any(exits):
+            axes[1].plot(*trajectory[exits].T, "rx", markersize=9, label="Workspace exit")
+            lo = np.minimum(np.min(trajectory, axis=0), 0) - 0.2 * mdp.cell_widths
+            hi = np.maximum(np.max(trajectory, axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
+            axes[1].set(xlim=(lo[0], hi[0]), ylim=(lo[1], hi[1]))
+            axes[1].legend()
     axes[0].set_title("Value function")
     axes[1].set_title("Policy and deployment trajectory")
     fig.suptitle(title)
@@ -99,7 +113,10 @@ def plot_conformal_history(history, target_failure):
     axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
     returns = [item["discounted_return"] for item in history]
     axes[4].plot(episodes, returns, label="Discounted r(s,a)")
-    for key, marker, color in (("goal_reached", "o", "green"), ("collision", "x", "red")):
+    for key, marker, color in (
+        ("goal_reached", "o", "green"), ("collision", "x", "red"),
+        ("workspace_exit", "x", "purple"),
+    ):
         indices = np.flatnonzero([item[key] for item in history])
         axes[4].scatter(episodes[indices], np.asarray(returns)[indices], marker=marker,
                         color=color, label=key.replace("_", " "))

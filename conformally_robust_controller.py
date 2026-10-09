@@ -9,10 +9,13 @@ from Tabular_Agent import Tabular_Agent
 class ConformallyRobustController:
     """Own independent nominal/deployment environments and persistent calibration.
 
-    Every outer episode starts Algorithm 1 from zero. Only actual deployment
-    transitions enter the cumulative mismatch estimate. Pilot calibration does
-    not enter that estimate. Absorbing transitions are executed and counted, so
-    the uniform conditional mismatch assumption must be assessed separately.
+    Algorithm 2 starts Algorithm 1 from zero every episode; the nominal baseline
+    reuses its fixed policy. The MDP supplies clone() and deploy_policy(). Only
+    actual deployment transitions enter the mismatch estimate; pilot calibration
+    and evaluation do not. Absorbing transitions are executed and counted.
+
+    R/C=None selects online estimation/calibration; numeric values hold them fixed.
+    method='nominal' plans with R=C=0; method='global' plans with C=infinity.
     """
 
     def __init__(
@@ -20,8 +23,11 @@ class ConformallyRobustController:
         training_horizon=100, initial_R=0.1, target_failure=0.1, initial_failure=None,
         eta=0.01, calibration_scores=None, calibration_window=100, pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
-        epsilon_decay_rate=0.995, seed=None,
+        epsilon_decay_rate=0.995, seed=None, method="proposed", R=None, C=None,
     ):
+        if method not in ("proposed", "nominal", "global"):
+            raise ValueError("method must be 'proposed', 'nominal', or 'global'.")
+        Tabular_Agent._validate_uncertainty(initial_R if R is None else R, 0 if C is None else C)
         for name, value in (
             ("horizon", horizon), ("training_episodes", training_episodes),
             ("training_horizon", training_horizon), ("pilot_episodes", pilot_episodes),
@@ -38,6 +44,9 @@ class ConformallyRobustController:
         self.training_episodes = int(training_episodes)
         self.pilot_episodes = int(pilot_episodes)
         self.seed = seed
+        self.method = method
+        self.fixed_R = None if R is None else float(R)
+        self.fixed_C = None if C is None else float(C)
         self.rng = np.random.default_rng(seed)
         self.training_env = mdp.clone(
             nominal=True, episode_mode="episodic", max_episode_steps=training_horizon,
@@ -78,100 +87,75 @@ class ConformallyRobustController:
     def initialize_calibration(self):
         if self.calibrator is not None:
             return list(self.calibrator.scores)
+
+        def random_policy(state):
+            return int(self.rng.integers(self.deployment_env.action_space.n))
+
         for _ in range(self.pilot_episodes):
-            state, _ = self.deployment_env.reset(seed=self._next_seed())
-            score = 0.0
-            for step in range(self.horizon):
-                action = int(self.rng.integers(self.deployment_env.action_space.n))
-                position = self.training_env.nominal_next_position(state, action)
-                state, _, terminated, truncated, info = self.deployment_env.step(action)
-                score = max(score, float(np.linalg.norm(info["position"] - position)))
-                self._check_horizon(step, terminated, truncated)
-            self.pilot_scores.append(score)
+            record = self.deployment_env.deploy_policy(
+                random_policy, self.gamma, seed=self._next_seed(),
+            )
+            self.pilot_scores.append(record["score"])
         self.calibrator = ACP(self.pilot_scores, **self.calibration_options)
         self.initial_calibration_scores = list(self.calibrator.scores)
         return list(self.calibrator.scores)
 
-    def _check_horizon(self, step, terminated, truncated):
-        if step + 1 < self.horizon and (terminated or truncated):
-            raise RuntimeError("Deployment ended before the required fixed horizon.")
-
     def run_episode(self):
+        """Train and deploy once, then update uncertainty from this episode only."""
         self.initialize_calibration()
-        conformal_radius = self.calibrator.quantile()
+        conformal_radius = self.calibrator.quantile() if self.fixed_C is None else self.fixed_C
         planning_radius = self.calibrator.planning_radius(conformal_radius)
-        R_used = self.R_estimate
-        self.agent = Tabular_Agent(
-            self.training_env, R=R_used, C=planning_radius, seed=self._next_seed(),
-            **self.agent_options,
+        R_used = self.R_estimate if self.fixed_R is None else self.fixed_R
+        if self.method == "nominal":
+            R_used, planning_radius = 0.0, 0.0
+        elif self.method == "global":
+            planning_radius = np.inf
+        reused = self.method == "nominal" and self.agent is not None
+        if not reused:
+            self.agent = Tabular_Agent(
+                self.training_env, R=R_used, C=planning_radius, seed=self._next_seed(),
+                **self.agent_options,
+            )
+            self.Q, self.policy = self.agent.robust_q_learning(
+                self.training_episodes, exploring_starts=True, record_every=100,
+            )
+        record = self.deployment_env.deploy_policy(
+            self.policy, self.gamma, seed=self._next_seed(),
         )
-        self.Q, self.policy = self.agent.robust_q_learning(
-            self.training_episodes, exploring_starts=True, record_every=100,
-        )
-        state, info = self.deployment_env.reset(seed=self._next_seed())
-        states = [state]
-        positions = [info["position"].copy()]
-        actions, rewards, deviations, mismatches = [], [], [], []
-        absorbing, boundary_attempts, boundary_violations = [], [], []
-        goal_step = None
-        collision_step = None
-        discounted_return = 0.0
-        discount = 1.0
-        for step in range(self.horizon):
-            action = int(self.policy[state])
-            nominal_state = self.training_env.nominal_next_state(state, action)
-            nominal_position = self.training_env.coordinates(nominal_state)
-            successor, reward, terminated, truncated, info = self.deployment_env.step(action)
-            deviation = float(np.linalg.norm(info["position"] - nominal_position))
-            mismatch = int(successor != nominal_state)
-            self.transition_count += 1
-            self.mismatch_count += mismatch
-            discounted_return += discount * reward
-            discount *= self.gamma
-            actions.append(action)
-            rewards.append(float(reward))
-            deviations.append(deviation)
-            mismatches.append(mismatch)
-            absorbing.append(bool(info["absorbing_transition"]))
-            boundary_attempts.append(bool(info["boundary_attempt"]))
-            boundary_violations.append(bool(info["boundary_violation"]))
-            if info["goal_reached"] and goal_step is None:
-                goal_step = step + 1
-            if info["collision"] and collision_step is None:
-                collision_step = step + 1
-            state = successor
-            states.append(state)
-            positions.append(info["position"].copy())
-            self._check_horizon(step, terminated, truncated)
-        score = max(deviations)
+        self.transition_count += len(record["actions"])
+        self.mismatch_count += record["episode_mismatches"]
         self.R_estimate = self.mismatch_count / self.transition_count
-        update = self.calibrator.update(score, predicted_radius=conformal_radius)
-        active = ~np.asarray(absorbing)
-        active_mismatches = np.asarray(mismatches)[active]
-        active_rate = float(np.mean(active_mismatches)) if np.any(active) else None
-        record = {
+        if self.fixed_C is None:
+            update = self.calibrator.update(record["score"], predicted_radius=conformal_radius)
+        else:
+            update = {
+                "miscoverage": int(record["score"] > conformal_radius),
+                "delta_before": self.calibrator.delta, "delta_after": self.calibrator.delta,
+            }
+            self.calibrator.scores.append(record["score"])
+        record.update({
             "episode": len(self.history) + 1, "R_used": R_used,
             "R_next": self.R_estimate, "conformal_radius": float(conformal_radius),
-            "planning_radius": planning_radius, "score": score,
-            "planned_miscoverage": int(score > planning_radius), **update,
+            "planning_radius": float(planning_radius),
+            "planned_miscoverage": int(record["score"] > planning_radius), **update,
             "transition_count": self.transition_count, "mismatch_count": self.mismatch_count,
-            "episode_mismatches": sum(mismatches), "active_mismatch_rate": active_rate,
-            "absorbing_transitions": sum(absorbing), "discounted_return": discounted_return,
-            "goal_reached": goal_step is not None, "collision": collision_step is not None,
-            "goal_step": goal_step, "collision_step": collision_step,
-            "boundary_attempts": sum(boundary_attempts),
-            "boundary_violations": sum(boundary_violations),
-            "training": self.agent.training_diagnostics.copy(),
-            "states": np.asarray(states), "positions": np.asarray(positions),
-            "actions": np.asarray(actions), "rewards": np.asarray(rewards),
-            "deviations": np.asarray(deviations), "mismatches": np.asarray(mismatches),
-            "absorbing": np.asarray(absorbing),
-        }
+            "training": self.agent.training_diagnostics.copy(), "training_reused": reused,
+        })
         self.history.append(record)
         return record
 
-    def run(self, n_episodes):
+    def run(self, n_episodes, *, verbose=False):
         if not isinstance(n_episodes, (int, np.integer)) or n_episodes < 1:
             raise ValueError("n_episodes must be a positive integer.")
-        return [self.run_episode() for _ in range(n_episodes)]
+        records = []
+        for _ in range(n_episodes):
+            record = self.run_episode()
+            records.append(record)
+            if verbose:
+                print(
+                    f"{self.method}, seed {self.seed}, episode {record['episode']}: "
+                    f"R={record['R_used']:.3f}, C={record['planning_radius']:.3f}, "
+                    f"goal={record['goal_reached']}",
+                )
+        return records
 

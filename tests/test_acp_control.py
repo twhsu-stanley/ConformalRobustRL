@@ -98,7 +98,7 @@ class ControllerTests(unittest.TestCase):
         controller.run_episode()
         self.assertEqual(controller.transition_count, 4)
 
-    def test_zero_noise_counts_absorbing_steps_and_retains_empty_predictions(self):
+    def test_zero_noise_counts_H_goal_transitions_and_retains_empty_predictions(self):
         mdp = Robot2DMotionMDP(x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0)
         controller = ConformallyRobustController(
             mdp, horizon=6, training_episodes=200, calibration_scores=[0] * 5,
@@ -107,7 +107,7 @@ class ControllerTests(unittest.TestCase):
         controller.calibrator.delta = 1.1
         record = controller.run_episode()
         self.assertTrue(record["goal_reached"])
-        self.assertEqual(record["absorbing_transitions"], 4)
+        self.assertEqual(np.count_nonzero(record["source_states"] == mdp.goal_state), 4)
         self.assertEqual(record["transition_count"], 6)
         self.assertEqual(record["R_next"], 0)
         self.assertEqual(record["score"], 0)

@@ -35,7 +35,7 @@ class RobustQLearningTests(unittest.TestCase):
     def test_robust_target_and_limiting_cases(self):
         mdp = self.small_mdp()
         agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
-        values = np.array((0.4, 0.8, 0.2, 0.0))
+        values = np.array((0.4, 0.8, 0.2, 0.0, 0.0))
         self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values), 0.1 + 0.9 * 0.75 * 0.8)
         self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, R=0), 0.82)
         self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, C=0), 0.82)
@@ -52,7 +52,7 @@ class RobustQLearningTests(unittest.TestCase):
         self.assertEqual(agent.evaluation_return[0], 0)
         self.assertEqual(agent.training_diagnostics["unvisited_pairs"], 0)
         self.assertLess(agent.training_diagnostics["bellman_residual"], 1e-6)
-        self.assertEqual(policy.shape, (4,))
+        self.assertEqual(policy.shape, (mdp.n_state,))
         np.testing.assert_array_equal(Q[mdp.terminal_mask], 0)
         Q.fill(-10)
         self.assertTrue(np.all(agent.Q >= 0))
