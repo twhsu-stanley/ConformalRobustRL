@@ -28,7 +28,7 @@ def main(
         obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
         start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
         noise_probability=0.0, noise_radius=0.0, noise_sampler=None,
-        max_episode_steps=horizon, episode_mode="episodic", seed=seed,
+        max_episode_steps=horizon, seed=seed,
     )
     evaluation_return = []
     agents = []

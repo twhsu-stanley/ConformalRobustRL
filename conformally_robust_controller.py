@@ -12,7 +12,8 @@ class ConformallyRobustController:
     Algorithm 2 starts Algorithm 1 from zero every episode; the nominal baseline
     reuses its fixed policy. The MDP supplies clone() and deploy_policy(). Only
     actual deployment transitions enter the mismatch estimate; pilot calibration
-    and evaluation do not. Absorbing transitions are executed and counted.
+    and evaluation do not. Episodes stop at a terminal condition, with horizon
+    acting as a step limit. R uses the total observed transition count tau_k.
 
     R/C=None selects online estimation/calibration; numeric values hold them fixed.
     method='nominal' plans with R=C=0; method='global' plans with C=infinity.
@@ -48,10 +49,8 @@ class ConformallyRobustController:
         self.fixed_R = None if R is None else float(R)
         self.fixed_C = None if C is None else float(C)
         self.rng = np.random.default_rng(seed)
-        self.training_env = mdp.clone(
-            nominal=True, episode_mode="episodic", max_episode_steps=training_horizon,
-        )
-        self.deployment_env = mdp.clone(episode_mode="fixed_horizon", max_episode_steps=horizon)
+        self.training_env = mdp.clone(nominal=True, max_episode_steps=training_horizon)
+        self.deployment_env = mdp.clone(max_episode_steps=horizon)
         self.R_estimate = float(initial_R)
         self.initial_R = float(initial_R)
         self.transition_count = 0
@@ -155,7 +154,7 @@ class ConformallyRobustController:
                 print(
                     f"{self.method}, seed {self.seed}, episode {record['episode']}: "
                     f"R={record['R_used']:.3f}, C={record['planning_radius']:.3f}, "
-                    f"goal={record['goal_reached']}",
+                    f"steps={record['episode_length']}, goal={record['goal_reached']}",
                 )
         return records
 

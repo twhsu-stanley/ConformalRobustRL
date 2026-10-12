@@ -5,9 +5,9 @@ Algorithm 1 learns a tabular robust Q-function from the nominal simulator.
 Algorithm 2 deploys the policy, estimates the discrete mismatch probability R,
 and uses adaptive conformal prediction (ACP) to calibrate a continuous deviation
 radius C. Q-learning starts from zero; the transformer/LLM warm start is not implemented.
-Deployment records H unprojected noisy transitions. Exits and obstacle landings
-restart from the pre-action position without recording or counting a reset step.
-The usual disturbance distribution also applies at the goal.
+Deployment records unprojected noisy transitions until goal arrival, obstacle
+collision, workspace exit, or the episode step limit. Episode lengths may vary;
+the final transition contributes to both R estimation and the episode C score.
 
 ## Setup and run the comparison
 
@@ -86,7 +86,7 @@ With `C=None`, ACP diagnostics are still collected for the nominal and global me
 | --- | --- | --- |
 | `n_episodes` | 30 | Outer deployment episodes |
 | `training_episodes` | 4000 | Inner Algorithm 1 training episodes per call |
-| `horizon` | 100 | Deployment transitions and nominal training horizon |
+| `horizon` | 100 | Maximum deployment and nominal training episode length |
 | `gamma` | 0.95 | Reward discount |
 | `initial_R` | 0.1 | Estimate used before any online deployment |
 | `target_failure` | 0.1 | Target long-run episode miscoverage |
@@ -148,26 +148,24 @@ s = discretize(x)
 a = policy[s]
 Delta = sample_from_unknown_distribution()
 x_observed = F(x,a) + Delta
-s_observed = Phi(x_observed)
-# Record this attempted transition, its mismatch, and Delta.
-x = x if outside_or_obstacle(x_observed) else x_observed
+s_observed = discretize(x_observed)
+# Record the transition, including its mismatch and the original Delta.
+x = x_observed
+# End the episode at a goal, obstacle, workspace exit, or the step limit.
 ```
 
-At every recorded transition, Delta is zero with probability 0.7 and otherwise uniform in a
-disk of radius 1.2. The sampled vector is neither projected nor resampled, including
-when it leaves the workspace. The exiting position is recorded outside X, together
-with the original vector and norm. An exit or obstacle landing restores the exact
-pre-action position before the next action. This recovery produces no recorded
-transition, mismatch, disturbance, or reward and does not reset the H-step counter.
-Goal states receive the same fresh disturbance draws as all other grid states;
-they are never padded with forced zero-noise transitions. Deployment records
-exactly H attempts, with R/C and the policy fixed throughout the block. Training
-uses a separate noise-free episodic clone. The physical
-noise law is not supplied to the learner.
+At every recorded transition, Delta is zero with probability 0.7 and otherwise
+uniform in a disk of radius 1.2. The sampled vector is neither projected nor
+resampled, including when it leaves the workspace. The final position, original
+vector, and norm are recorded before checking the terminal condition. There are
+no subsequent transitions from terminal states and no padding to the step limit.
+R, C, and the policy stay fixed within each episode. Training uses a separate
+noise-free episodic clone. The physical noise law is not supplied to the learner.
 
-The extended Phi and external restart convention should be stated in the paper.
-Outside grid cells share a zero planning value through the finite exit outcome;
-the agent never takes an action from that outcome during deployment.
+The finite exit outcome is an implementation convention for terminating outside
+landings: extended-grid Phi retains their distinct coordinates for observations,
+while outside cells share a zero planning value. The agent never takes an action
+from the exit outcome during deployment.
 A custom `noise_sampler(nominal_position, rng)` can return a bounded 2-D disturbance;
 the comparison plotter's analytic mismatch reference assumes the default disk law.
 
@@ -179,7 +177,7 @@ workspace exit separately. When changing rewards, keep movement reward below
 `(1-gamma)*goal_reward` for the nominal episodic goal-reaching task.
 
 The localized uncertainty neighborhood contains every cell intersecting the
-continuous deviation ball, as in Equation (3), including obstacle and goal cells.
+continuous deviation ball, as in Equations (3)-(4), including obstacle and goal cells.
 It also includes the zero-valued failure outcome whenever that ball contains a
 point in an outside grid cell. This allows robust Q-learning to account for exit risk
 although nominal training itself never leaves the grid. With half-open cells, touching
@@ -201,17 +199,17 @@ For each proposed or global episode:
 1. Predict the conformal radius using scores available before deployment, and
    select the pre-episode R estimate.
 2. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C.
-3. Deploy the resulting policy for exactly H attempts and record each actual source
-   and observed landing, reward, mismatch, and disturbance. Restart after exits or
-   collisions without adding a transition. Continue applying noise at the goal.
+3. Deploy until a terminal condition or the step limit, recording every landing,
+   reward, mismatch, and disturbance, including the final transition.
 4. Update R as total discrete mismatches divided by total online transitions.
 5. Compute the maximum continuous deviation over the episode, score the
    pre-episode prediction, and update ACP and its score window.
 
 Pilot and evaluation transitions never enter the R estimator. Evaluation freezes
-the final policy and never updates R or ACP. All H online attempts enter R;
-external restarts add no samples. The calibration window applies only to C scores;
-R uses the entire online history.
+the final policy and never updates R or ACP. All actual online transitions enter R.
+The calibration window applies only to C scores; R uses the entire online history.
+The step limit ensures a finite episode length, as required by Assumption 6;
+episodes contain at least one transition and need not have a common length.
 
 Exploring starts cycle through shuffled nonterminal state-action pairs. The
 controller uses learning rate 0.5 for the first 100,000 training transitions,
@@ -229,8 +227,11 @@ figures in PNG and PDF formats. It does not run the robot or retrain policies.
 ### R estimation: `r_estimation`
 
 The first panel shows individual seed estimates, their mean, and the common true R-star.
-The second shows RMSE over seeds around R-star versus
-the number of online transitions, with an `n^(-1/2)` reference slope.
+The second shows each seed's absolute estimation error against its own cumulative
+transition count tau_k, together with the simultaneous bound from Lemma 5:
+`sqrt(log(2*tau_k*(tau_k+1)/delta_R)/(2*tau_k))`.
+`plot_comparison(..., delta_R=0.05)` sets its confidence parameter. The bound
+applies to each run; it is not a joint confidence statement across seeds.
 
 The disturbance injection probability 0.3 is not the discrete mismatch probability.
 Under the default unprojected noise law, the mismatch probability for every grid
@@ -244,16 +245,17 @@ The plotter computes the disk/square intersection for this offline reference onl
 After k online episodes, the controller estimate is:
 
 ```text
-R_hat_next = sum of observed mismatch indicators / (k*H)
+tau_k = sum of actual episode lengths through episode k
+R_hat_next = sum of observed mismatch indicators / tau_k
 ```
 
-There is no absorption weighting: every counted transition samples the same
-disturbance law, including transitions from the goal. Restarts use past observations
-to select the next source, without rejecting or redrawing any disturbance. Under
-the default independent sampler and extended uniform Phi, the mismatch
-mean is R-star at every counted step. The H-sample blocks therefore retain
-`tau_k=k*H` and the centered-martingale condition used by Lemma 5. A custom sampler
-must independently satisfy these conditions; accepting a callable does not verify them.
+Under the default independent sampler and extended uniform Phi, the mismatch
+mean is the same R-star at every counted step, conditional on previous observations
+and the selected action. This satisfies Assumptions 3 and 5 and the martingale
+condition used by Lemma 5. Ending an episode on a noisy terminal landing does not
+discard that sample. R weights episodes by their actual transition counts, rather
+than averaging per-episode mismatch rates. A custom sampler must independently
+satisfy the paper's assumptions; accepting a callable does not verify them.
 
 ### ACP calibration: `acp_calibration`
 
@@ -271,7 +273,7 @@ they do not simulate counterfactual policies or establish navigation benefits
 for separate frozen-calibration controllers.
 
 ACP uses rank `ceil((1-delta_k)*(N+1))` without interpolation. After observing
-score `score_k=max_t ||Delta_t||`, it updates:
+score `score_k=max_{0 <= t < episode_length} ||Delta_t||`, it updates:
 
 ```text
 miss_k = 1{score_k > predicted_C_k}
@@ -304,20 +306,19 @@ results. The six displayed quantities are:
 
 | Quantity | Meaning |
 | --- | --- |
-| Goal success | Fraction reaching the actual goal within H transitions |
+| Goal success | Fraction ending at the actual goal |
 | Collision | Fraction entering an actual obstacle cell |
-| Workspace exit | Fraction with at least one outside landing within H attempts |
-| Goal not reached by H | Fraction never reaching the goal within H attempts |
+| Workspace exit | Fraction ending outside the workspace |
+| Timeout | Fraction reaching the step limit without another terminal event |
 | Actual discounted reward | Mean of `sum_t gamma^t r(s_t,a_t)` during deployment |
 | Discounted actual goal arrival | Mean of `gamma^(T_goal-1)` for successes and 0 for failures |
 
 Saved evaluation data also include the mean of the worst 10% of discounted returns,
-using fractional tail mass when necessary. First goal/collision/exit steps and
-collision/exit counts are stored in online histories. Because deployment continues
-after goal arrival and restarts after failures, success, collision, and exit rates
-can overlap; they are not mutually exclusive outcomes. Goal success and timeout
-sum to one. Returns include H attempted transitions across restarts, rather than
-the value of one uninterrupted rollout. Examine all outcomes and reward together.
+using fractional tail mass when necessary. Evaluation also saves mean episode
+length. Goal, collision, exit, and timeout are mutually exclusive outcomes whose
+rates sum to one. Histories retain episode lengths and the terminal event step.
+Returns include only the transitions actually taken in one uninterrupted rollout.
+Examine all outcomes and reward together.
 
 The current performance figure compares final policies; it does not evaluate
 checkpoint policies throughout training or add confidence intervals. To assess
@@ -339,30 +340,30 @@ include the proposed method and set `evaluation_episodes` to a positive number.
 Single-run `main(save_plots=True)` instead saves `online_uncertainty.png` and
 `final_policy.png`.
 
-## Stationarity and a changing true R
+## Distribution shifts with a fixed true R
 
-The main comparison holds the unknown physical disturbance law fixed throughout
-all H transitions of every run, including at the goal. Changing observed scores,
-estimates, or calibrated radii does not itself
-mean that the underlying law changed. Separate calls can compare different fixed
-noise settings; they do not implement a distribution shift within one run.
+Assumption 5 allows the unknown distribution D-star-k and its bounded support
+C-star-k to change between episodes, while retaining a common conditional
+mismatch mean R-star. The distribution stays fixed within each episode.
+The default comparison uses one fixed distribution, a special case of this setting.
+Changing observed scores or ACP radii does not itself imply a distribution shift.
 
-If a true uniform mismatch mean R-star(j) changes across episodes, the cumulative
-estimator used before episode k is centered on its historical average, not the
-current R-star(k). With equal horizons, that reference is the average over episodes
-1 through k-1. Error relative to the current value includes both sampling error
-and the difference between the historical average and current value.
-For example, 500 episodes at R=0.1 followed by 500 at R=0.3 produce expected
-cumulative R=0.2 when the current value is 0.3.
+For a shifted experiment, change `controller.deployment_env.noise_radius` and
+`noise_probability` between `run_episode()` calls, keeping the same R-star.
+For a disk containing the whole nominal cell, use
+`noise_probability = R_star / (1 - cell_area/(pi*noise_radius**2))`, provided this
+probability is at most one. For example, the default unit-cell law at radius 1.2
+and probability 0.3 has the same R-star as radius 2.4 and probability approximately
+0.247354794. The learner receives neither parameter; its cumulative R estimate and
+ACP history continue across the shift. The analytic R plot assumes this common
+R-star; it does not infer an arbitrary custom sampler's reference.
 
-Consequently, the fixed-R concentration and vanishing average-regret claims do
-not automatically extend to arbitrary time variation. Tracking a changing R would
-require a different estimator, such as a sliding window or discounting, and new
-drift assumptions and bounds. Algorithm 1 can still solve each supplied fixed
-planning problem, and ACP's coverage bookkeeping remains meaningful; ACP coverage
-does not correct an underestimated R. Increasing the disk radius also changes
-discrete mismatch probabilities, so a support shift is not generally a C-only shift.
-Such an experiment would be an extension beyond the current stationary comparison.
+Changing the radius alone generally changes R-star and violates Assumption 5.
+When the true R varies, the cumulative estimator summarizes past transition
+mismatch means; the paper's fixed-R concentration and regret statements no longer
+apply. Theorem 3 compares robust planning at estimated R with an oracle at the same
+calibrated C, rather than guaranteeing navigation success or finite-budget
+Q-learning accuracy.
 
 ## Saved data and paths
 
@@ -381,12 +382,12 @@ evaluation metrics and samples. `final_policy.npz` contains Q, policy, and
 state-action visit counts. Q has shape `(65, 4)` and policy has shape `(65,)` on the
 default grid; the failure row is zero. Each history records pre-episode planning R/C, raw
 conformal radius, score, miscoverage, ACP parameters before/after, cumulative
-counts, training diagnostics, original deviation vectors, attempted continuous
-landings, extended-grid quantized positions, and collision/exit events and counts.
-`source_states` and `source_positions` record the actual source of each attempt;
-`states[1:]` and `positions[1:]` record its landing before any restart. Their
-successive entries need not form a continuous path because recovery is unrecorded.
-Trajectory plots draw each source-to-landing segment without drawing reset moves.
+counts, training diagnostics, original deviation vectors, continuous positions,
+extended-grid quantized positions, episode length, and terminal outcome.
+`states` and `positions` contain the initial observation followed by each actual
+landing, including the terminal landing; they have length `episode_length + 1`.
+The disturbance, action, reward, and mismatch arrays have length `episode_length`.
+Trajectory plots connect these successive positions directly.
 `comparison.pkl` collects run records and adds the grouping `trial_seed`.
 
 ```python
@@ -406,8 +407,8 @@ with np.load('robot_2d/saved_results/online/final_policy.npz') as file:
 These paths describe different example runs; use the per-method folder for a
 policy saved by the comparison script. Rerunning with the same output directory
 replaces files at those names, so use distinct directories for separate experiments.
-Results from previous projected or absorbing deployments require rerunning to
-produce the current restart observations and trajectory fields.
+Results from previous projected, padded, or resetting deployments require rerunning
+to produce the current terminal episodes, transition counts, and trajectory fields.
 
 ## Algorithm 1 alone and its learning curves
 
@@ -453,7 +454,7 @@ python -B -m unittest discover -s robot_2d/tests -v
 ```
 
 The suites cover ACP update order and extended tails, zero-initialized robust
-learning and reference solutions, cumulative mismatch accounting, continuous
-noise without projection, workspace-exit planning, uncounted restarts, noise at the goal,
-saved run files and policy plots,
+learning and reference solutions, cumulative accounting across unequal episode
+lengths, continuous noise without projection, workspace-exit planning, terminal
+transition recording, saved run files and policy plots,
 script imports, and controller continuation with retained experiment settings.

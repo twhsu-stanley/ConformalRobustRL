@@ -1,6 +1,7 @@
 """General ACP bookkeeping and conformally robust controller lifecycle checks."""
 
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -62,15 +63,15 @@ class ControllerTests(unittest.TestCase):
     def test_episode_statistics_use_real_deployment_observations(self):
         controller = self.controller()
         record = controller.run_episode()
-        self.assertEqual(controller.transition_count, 4)
+        self.assertEqual(controller.transition_count, record["episode_length"])
         self.assertEqual(controller.mismatch_count, np.sum(record["mismatches"]))
         self.assertAlmostEqual(record["score"], max(record["deviations"]))
-        self.assertAlmostEqual(record["R_next"], np.sum(record["mismatches"]) / 4)
+        self.assertAlmostEqual(record["R_next"], np.mean(record["mismatches"]))
         self.assertAlmostEqual(record["conformal_radius"], 0.1)
         self.assertEqual(record["miscoverage"], int(record["score"] > 0.1))
         self.assertAlmostEqual(record["delta_after"], 0.2 + 0.1 * (0.2 - record["miscoverage"]))
-        self.assertEqual(record["positions"].shape, (5, 2))
-        self.assertEqual(len(record["actions"]), 4)
+        self.assertEqual(record["positions"].shape, (record["episode_length"] + 1, 2))
+        self.assertLessEqual(record["episode_length"], controller.horizon)
         self.assertTrue(record["training"]["zero_initialized"])
         self.assertIsNot(controller.training_env, controller.deployment_env)
         self.assertTrue(controller.training_env.is_nominal)
@@ -84,10 +85,38 @@ class ControllerTests(unittest.TestCase):
         self.assertIsNot(first_agent, controller.agent)
         self.assertEqual(controller.agent.evaluation_return[0], 0)
         self.assertAlmostEqual(second["R_used"], first["R_next"])
-        self.assertEqual(second["transition_count"], 8)
+        count = first["episode_length"] + second["episode_length"]
+        self.assertEqual(second["transition_count"], count)
         self.assertEqual(second["mismatch_count"],
                          first["episode_mismatches"] + second["episode_mismatches"])
-        self.assertAlmostEqual(second["R_next"], second["mismatch_count"] / 8)
+        self.assertAlmostEqual(second["R_next"], second["mismatch_count"] / count)
+
+    def test_variable_episodes_weight_R_by_transitions_and_update_ACP_once_each(self):
+        deviations = iter(([0.2, 0], [0.1, 0], [-2.0, 0], [0, 0], [0, 0.6]))
+        mdp = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), noise_radius=2,
+            noise_sampler=lambda position, rng: np.array(next(deviations)),
+        )
+        controller = ConformallyRobustController(
+            mdp, horizon=6, training_episodes=1, calibration_scores=[0.1] * 10,
+            target_failure=0.2, eta=0.1, initial_R=0.2,
+        )
+        policy = np.array([0, 2, 0, 0, 0])
+        with patch("conformally_robust_controller.Tabular_Agent.robust_q_learning",
+                   return_value=(np.zeros((mdp.n_state, 4)), policy)):
+            first, second, third = controller.run(3)
+        self.assertEqual([row["episode_length"] for row in controller.history], [2, 1, 2])
+        self.assertEqual([row["transition_count"] for row in controller.history], [2, 3, 5])
+        self.assertAlmostEqual(first["score"], 0.2)
+        self.assertEqual(second["score"], 2)
+        self.assertAlmostEqual(third["score"], 0.6)
+        self.assertEqual(first["R_next"], 0)
+        self.assertAlmostEqual(second["R_next"], 1 / 3)
+        self.assertEqual(third["R_next"], 0.4)
+        self.assertEqual(second["R_used"], first["R_next"])
+        self.assertEqual(third["R_used"], second["R_next"])
+        self.assertEqual(controller.calibrator.n_updates, 3)
+        self.assertAlmostEqual(controller.calibrator.delta, 0.06)
 
     def test_pilot_scores_do_not_enter_R_counts(self):
         controller = self.controller(calibration_scores=None, pilot_episodes=3)
@@ -95,10 +124,10 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(len(controller.pilot_scores), 3)
         self.assertEqual(controller.transition_count, 0)
         self.assertEqual(controller.mismatch_count, 0)
-        controller.run_episode()
-        self.assertEqual(controller.transition_count, 4)
+        record = controller.run_episode()
+        self.assertEqual(controller.transition_count, record["episode_length"])
 
-    def test_zero_noise_counts_H_goal_transitions_and_retains_empty_predictions(self):
+    def test_zero_noise_stops_at_goal_and_retains_empty_predictions(self):
         mdp = Robot2DMotionMDP(x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0)
         controller = ConformallyRobustController(
             mdp, horizon=6, training_episodes=200, calibration_scores=[0] * 5,
@@ -107,8 +136,9 @@ class ControllerTests(unittest.TestCase):
         controller.calibrator.delta = 1.1
         record = controller.run_episode()
         self.assertTrue(record["goal_reached"])
-        self.assertEqual(np.count_nonzero(record["source_states"] == mdp.goal_state), 4)
-        self.assertEqual(record["transition_count"], 6)
+        self.assertEqual(record["episode_length"], 2)
+        self.assertFalse(np.any(record["states"][:-1] == mdp.goal_state))
+        self.assertEqual(record["transition_count"], 2)
         self.assertEqual(record["R_next"], 0)
         self.assertEqual(record["score"], 0)
         self.assertEqual(record["miscoverage"], 1)

@@ -4,9 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def plot_robot_motion(
-    mdp, Q, policy, trajectory=None, title="Robot motion", *, source_positions=None,
-):
+def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     """Plot values, direction commands, and an optional continuous trajectory."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
     extent = (0, mdp.bounds[0], 0, mdp.bounds[1])
@@ -44,12 +42,7 @@ def plot_robot_motion(
         )
     if trajectory is not None:
         trajectory = np.asarray(trajectory)
-        path = trajectory
-        if source_positions is not None:
-            sources = np.asarray(source_positions)
-            breaks = np.full_like(sources, np.nan)
-            path = np.stack((sources, trajectory[1:], breaks), axis=1).reshape(-1, 2)
-        axes[1].plot(path[:, 0], path[:, 1], "o-", color="tab:orange", markersize=3)
+        axes[1].plot(trajectory[:, 0], trajectory[:, 1], "o-", color="tab:orange", markersize=3)
         exits = np.array([mdp.discretize(x) == mdp.failure_state for x in trajectory])
         if np.any(exits):
             axes[1].plot(*trajectory[exits].T, "rx", markersize=9, label="Workspace exit")

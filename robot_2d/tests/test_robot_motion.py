@@ -138,22 +138,17 @@ class RobotMotionModelTests(unittest.TestCase):
         self.assertAlmostEqual(agent.robust_td_target(0.1, edge, values), 0.64)
         self.assertAlmostEqual(agent.robust_td_target(0.1, edge, values, C=0.5), 0.82)
 
-    def test_fixed_horizon_continues_sampling_at_the_nominal_goal_selfloop(self):
+    def test_goal_ends_the_episode_before_followup_transitions(self):
         mdp = Robot2DMotionMDP(
             grid_shape=(2, 2), x_max=2, y_max=2, max_episode_steps=4,
-            episode_mode="fixed_horizon",
             noise_sampler=lambda position, rng: np.array((0.2, 0.0)),
         )
         mdp.step(0)
         _, reward, terminated, truncated, _ = mdp.step(2)
         self.assertEqual(reward, 1)
-        self.assertFalse(terminated or truncated)
-        _, reward, _, _, info = mdp.step(1)
-        self.assertEqual(reward, 0)
-        self.assertEqual(info["nominal_state"], mdp.goal_state)
-        self.assertAlmostEqual(info["deviation_norm"], 0.2)
-        _, _, _, truncated, _ = mdp.step(1)
-        self.assertTrue(truncated)
+        self.assertTrue(terminated)
+        self.assertFalse(truncated)
+        self.assertEqual(mdp.elapsed_steps, 2)
         with self.assertRaises(RuntimeError):
             mdp.step(0)
 
@@ -313,7 +308,8 @@ class OnlineRunnerTests(unittest.TestCase):
                         results = pickle.load(file)
                     history = results["history"]
                     self.assertEqual(len(history), n_episodes)
-                    self.assertEqual(history[-1]["transition_count"], 5 * n_episodes)
+                    count = sum(record["episode_length"] for record in history)
+                    self.assertEqual(history[-1]["transition_count"], count)
                     self.assertEqual(history[0]["R_used"], 0.1)
                     self.assertTrue(
                         all(record["training"]["zero_initialized"] for record in history)

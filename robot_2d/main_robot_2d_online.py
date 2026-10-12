@@ -21,6 +21,7 @@ def evaluate_policy(mdp, policy, gamma, n_episodes, rng):
     goals = np.asarray([row["goal_reached"] for row in records])
     collisions = np.asarray([row["collision"] for row in records])
     exits = np.asarray([row["workspace_exit"] for row in records])
+    timeouts = np.asarray([row["timeout"] for row in records])
     arrivals = [gamma**(row["goal_step"] - 1) if row["goal_reached"] else 0 for row in records]
     ordered = np.sort(returns)
     tail_mass = 0.1 * n_episodes
@@ -29,11 +30,13 @@ def evaluate_policy(mdp, policy, gamma, n_episodes, rng):
     return {
         "success_rate": float(np.mean(goals)), "collision_rate": float(np.mean(collisions)),
         "workspace_exit_rate": float(np.mean(exits)),
-        "timeout_rate": float(np.mean(~goals)),
+        "timeout_rate": float(np.mean(timeouts)),
+        "mean_episode_length": float(np.mean([row["episode_length"] for row in records])),
         "discounted_return": float(np.mean(returns)),
         "discounted_goal_arrival": float(np.mean(arrivals)),
         "lower_tail_return": float(tail_total / tail_mass),
         "returns": returns, "goals": goals, "collisions": collisions, "workspace_exits": exits,
+        "timeouts": timeouts,
     }
 
 
@@ -47,7 +50,8 @@ def main(
     """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
 
     method='nominal' plans with R=0; method='global' plans with C=infinity.
-    The stationary simulator noise law is not supplied to the learning agent.
+    horizon caps episode length; goal, collision, and exit end deployment earlier.
+    The simulator noise law is not supplied to the learning agent.
     """
     if not isinstance(evaluation_episodes, (int, np.integer)) or evaluation_episodes < 0:
         raise ValueError("evaluation_episodes must be a nonnegative integer.")
@@ -56,7 +60,7 @@ def main(
         obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
         start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
         noise_probability=noise_probability, noise_radius=noise_radius,
-        max_episode_steps=horizon, episode_mode="fixed_horizon", seed=seed,
+        max_episode_steps=horizon, seed=seed,
     )
     controller = ConformallyRobustController(
         mdp, gamma=gamma, horizon=horizon, training_horizon=horizon,
@@ -73,7 +77,7 @@ def main(
             evaluation_episodes, controller.rng,
         )
     results = {
-        "method": method, "seed": seed, "mdp": mdp, "gamma": gamma,
+        "method": method, "seed": seed, "mdp": mdp, "gamma": gamma, "horizon": horizon,
         "fixed_R": R, "fixed_C": C,
         "target_failure": target_failure, "initial_failure": initial_failure,
         "eta": eta, "calibration_window": calibration_window,
@@ -106,7 +110,7 @@ def main(
         plt.close(fig)
         fig = plot_robot_motion(
             mdp, controller.Q, controller.policy, controller.history[-1]["positions"],
-            f"Final {method} policy", source_positions=controller.history[-1]["source_positions"],
+            f"Final {method} policy",
         )
         fig.savefig(output_dir / "final_policy.png", dpi=160)
         plt.close(fig)
