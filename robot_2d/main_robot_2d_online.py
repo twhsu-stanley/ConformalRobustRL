@@ -26,7 +26,7 @@ def main(
     """
     mdp = Robot2DMotionMDP(
         x_max=8.0, y_max=8.0, grid_shape=(8, 8),
-        obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
+        obstacles=[(5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
         start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
         noise_probability=noise_probability, noise_radius=noise_radius,
         max_episode_steps=horizon, seed=seed,
