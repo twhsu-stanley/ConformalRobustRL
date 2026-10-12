@@ -223,7 +223,7 @@ and unvisited pairs when selecting a common training budget across methods.
 ## Figures and what they establish
 
 The separate `plot_online_comparison.py` reads the per-run files from
-`saved_results/online/` and writes the R and ACP figures in PNG and PDF formats there.
+`saved_results/online/` and writes the R, ACP, and online policy comparison figures there.
 Its paths are fixed relative to the script. It does not run the robot or retrain policies.
 
 ### R estimation: `r_estimation`
@@ -265,7 +265,7 @@ The four panels show first-seed continuous episode scores and pre-episode radii,
 cumulative episode coverage, trailing-window coverage, and the mean number of
 states in localized neighborhoods compared with the 65-state global support.
 The support-size diagnostic averages over nominal targets of nonterminal
-state-action pairs. `plot_comparison(window=100)` controls the trailing
+state-action pairs. `plot_comparison(window=10)` controls the trailing
 coverage window independently of the calibration window used during the run.
 
 Coverage compares ACP with a rolling quantile at the fixed target failure
@@ -299,6 +299,21 @@ It is not a goal-success guarantee, a collision bound, or a guarantee for every
 short window. Assess coverage together with prediction efficiency and extended
 prediction tails. Under a stationary law, a frozen quantile may already work well;
 improved ACP performance must be demonstrated by the data.
+
+### Online policy comparison: `policy_comparison`
+
+The comparison uses the deployment episodes already recorded by Algorithm 2 and
+the nominal and global baselines. The first panel shows cumulative mean observed
+discounted reward, `G_k = sum_t gamma^t r(s_t,a_t)`, versus the online episode index.
+Thin curves show individual trials; solid curves show their mean.
+The second panel compares the fractions of those same episodes ending at the goal,
+an obstacle, outside the workspace, or at the step limit. Bars show trial means
+and dots show individual trials. These four outcomes are mutually exclusive.
+
+Each episode supplies one observation of its current deployed policy. The figure
+describes performance during online adaptation. It does not estimate Theorem 3's
+regret, which compares robust optimal values at estimated and true R with the same C.
+The comparison reads saved histories without running additional robot episodes.
 
 The R and ACP figures use runs labeled `proposed`.
 Single-run `main(save_plots=True)` saves `online_uncertainty_{test}.png` and
@@ -341,9 +356,9 @@ in `results_{method}_R{R}_C{C}_trial_{trial}.pkl`. For example:
 - `results_proposed_R0.2_C0.7_trial_1.pkl`: fixed R/C experiment.
 
 `None` in the filename denotes an unspecified planning parameter; method overrides
-still determine nominal and global planning. The R/ACP plotter uses the fixed
-pattern `results_proposed_RNone_CNone_trial_*.pkl`, including all matching trials.
-Edit that pattern in the plotter to select other tests.
+still determine nominal and global planning. The comparison plotter uses the fixed
+pattern `results_{method}_RNone_CNone_trial_*.pkl` for each of the three methods,
+including all matching trials. Edit those patterns in the plotter to select other tests.
 
 Each run record contains settings, the configured MDP, initial and pilot scores,
 final R and ACP parameter, full online histories, final Q/policy, state-action
@@ -359,7 +374,7 @@ The disturbance, action, reward, and mismatch arrays have length `episode_length
 Trajectory plots connect these successive positions directly.
 
 Single-run figures use the same method, R/C, and trial suffix as the results file.
-Comparison figures are `r_estimation` and `acp_calibration`,
+Comparison figures are `r_estimation`, `acp_calibration`, and `policy_comparison`,
 each in PNG and PDF format. These figures share the same folder as the result files.
 
 ```python
@@ -400,12 +415,12 @@ in `utils_tabular.py`.
 
 The companion `robot_2d_R{R}_C{C}_agents.pkl` contains the MDP and trained agents.
 Older curve files need retraining to produce this companion file. Use
-`python -m robot_2d.plot_eval_returns` for the saved fixed-parameter learning curves
-and `python -m robot_2d.plot_value_policy` for saved values and greedy policies.
+`python -m robot_2d.plot_fixedRC_eval_returns` for the saved fixed-parameter learning curves
+and `python -m robot_2d.plot_fixedRC_value_policy` for saved values and greedy policies.
 The value/policy plotter defaults to R=0.2, C=1.0, trial 0; select another case with:
 
 ```python
-from robot_2d.plot_value_policy import main as plot_policy
+from robot_2d.plot_fixedRC_value_policy import main as plot_policy
 
 fig = plot_policy(R=0.15, C=1.2, trial=0)
 ```

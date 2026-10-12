@@ -19,8 +19,8 @@ from gymnasium.utils.env_checker import check_env
 
 from robot_2d.main_robot_2d import main as single_main
 from robot_2d.main_robot_2d_online import main as online_main
-from robot_2d.plot_eval_returns import main as plot_saved_returns
-from robot_2d.plot_value_policy import main as plot_saved_policy
+from robot_2d.plot_fixedRC_eval_returns import main as plot_saved_returns
+from robot_2d.plot_fixedRC_value_policy import main as plot_saved_policy
 from robot_2d.utils import plot_robot_2d_tabular
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
@@ -31,8 +31,8 @@ class ScriptImportTests(unittest.TestCase):
         script_directory = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory(prefix="robot_script_imports_") as directory:
             for name in (
-                "main_robot_2d.py", "main_robot_2d_online.py", "plot_eval_returns.py",
-                "plot_value_policy.py",
+                "main_robot_2d.py", "main_robot_2d_online.py", "plot_fixedRC_eval_returns.py",
+                "plot_fixedRC_value_policy.py",
             ):
                 with self.subTest(script=name):
                     script = script_directory / name
@@ -247,8 +247,8 @@ class ResultsDirectoryTests(unittest.TestCase):
                 os.chdir(working_directory)
                 with ExitStack() as stack:
                     for name in (
-                        "main_robot_2d", "main_robot_2d_online", "plot_eval_returns",
-                        "plot_value_policy",
+                        "main_robot_2d", "main_robot_2d_online", "plot_fixedRC_eval_returns",
+                        "plot_fixedRC_value_policy",
                     ):
                         filename = str(script_directory / f"{name}.py")
                         stack.enter_context(patch(f"robot_2d.{name}.__file__", filename))

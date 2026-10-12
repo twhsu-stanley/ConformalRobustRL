@@ -157,18 +157,49 @@ def plot_calibration(runs, window):
     return fig
 
 
-def plot_comparison(window=100, delta_R=0.05):
-    """Read proposed online runs from saved_results/online and plot R/ACP diagnostics."""
+def plot_performance(runs):
+    """Compare the rewards and outcomes already recorded during online deployment."""
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
+    methods = list(dict.fromkeys(run["method"] for run in runs))
+    labels = {"proposed": "Proposed", "nominal": "Nominal", "global": "Global R-contamination"}
+    outcomes = {"goal_reached": "Goal", "collision": "Obstacle", "workspace_exit": "Exit",
+                "timeout": "Step limit"}
+    width = 0.8 / len(methods)
+    for index, method in enumerate(methods):
+        color = f"C{index}"
+        histories = [run["history"] for run in runs if run["method"] == method]
+        returns = np.array([[row["discounted_return"] for row in history] for history in histories])
+        episodes = np.arange(1, returns.shape[1] + 1)
+        averages = np.cumsum(returns, axis=1) / episodes
+        axes[0].plot(episodes, averages.T, color=color, alpha=0.2)
+        axes[0].plot(episodes, np.mean(averages, axis=0), color=color, label=labels[method])
+        rates = np.asarray([[np.mean([row[key] for row in history]) for key in outcomes]
+                            for history in histories])
+        positions = np.arange(len(outcomes)) + (index - (len(methods) - 1) / 2) * width
+        axes[1].bar(positions, np.mean(rates, axis=0), width, color=color, label=labels[method])
+        axes[1].plot(positions, rates.T, "k.", alpha=0.6)
+    axes[0].set(title="Cumulative mean discounted reward", xlabel="Online episode", ylabel="Reward")
+    axes[1].set(title="Outcomes across online episodes", ylabel="Episode fraction", ylim=(0, 1.02))
+    axes[1].set_xticks(np.arange(len(outcomes)), list(outcomes.values()))
+    fig.suptitle("Recorded online deployment episodes; dots denote individual trials")
+    return fig
+
+
+def plot_comparison(window=10, delta_R=0.05):
+    """Read the fixed online result filenames and plot R, ACP, and deployed performance."""
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     runs = []
-    for filename in sorted(output_dir.glob("results_proposed_RNone_CNone_trial_*.pkl")):
-        with filename.open("rb") as file:
-            runs.append(pickle.load(file))
+    for method in ("proposed", "nominal", "global"):
+        for filename in sorted(output_dir.glob(f"results_{method}_RNone_CNone_trial_*.pkl")):
+            with filename.open("rb") as file:
+                runs.append(pickle.load(file))
     if not runs:
-        raise FileNotFoundError(f"No proposed online results found in {output_dir}.")
-    figures = {
-        "r_estimation": plot_R(runs, delta_R), "acp_calibration": plot_calibration(runs, window),
-    }
+        raise FileNotFoundError(f"No online comparison results found in {output_dir}.")
+    proposed = [run for run in runs if run["method"] == "proposed"]
+    figures = {"policy_comparison": plot_performance(runs)}
+    if proposed:
+        figures["r_estimation"] = plot_R(proposed, delta_R)
+        figures["acp_calibration"] = plot_calibration(proposed, window)
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")
