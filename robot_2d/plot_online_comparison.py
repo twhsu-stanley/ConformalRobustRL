@@ -157,52 +157,25 @@ def plot_calibration(runs, window):
     return fig
 
 
-def plot_performance(runs):
-    """Show seed means and individual seed results from fresh final-policy evaluations."""
-    fig, axes = plt.subplots(2, 3, figsize=(15, 7), constrained_layout=True)
-    methods = list(dict.fromkeys(run["method"] for run in runs))
-    labels = {"proposed": "Proposed", "nominal": "Nominal", "global": "Global R-contamination"}
-    metrics = {
-        "success_rate": "Goal success", "collision_rate": "Obstacle collision",
-        "workspace_exit_rate": "Workspace exit", "timeout_rate": "Timeout",
-        "discounted_return": "Actual discounted reward",
-        "discounted_goal_arrival": "Discounted actual goal arrival",
+def plot_comparison(window=100, delta_R=0.05):
+    """Read proposed online runs from saved_results/online and plot R/ACP diagnostics."""
+    output_dir = Path(__file__).resolve().parent / "saved_results/online"
+    runs = []
+    for filename in sorted(output_dir.glob("results_proposed_RNone_CNone_trial_*.pkl")):
+        with filename.open("rb") as file:
+            runs.append(pickle.load(file))
+    if not runs:
+        raise FileNotFoundError(f"No proposed online results found in {output_dir}.")
+    figures = {
+        "r_estimation": plot_R(runs, delta_R), "acp_calibration": plot_calibration(runs, window),
     }
-    for axis, (metric, title) in zip(axes.ravel(), metrics.items()):
-        for index, method in enumerate(methods):
-            values = [run["evaluation"][metric] for run in runs if run["method"] == method]
-            axis.bar(index, np.mean(values), color=f"C{index}", alpha=0.6)
-            axis.scatter(np.full(len(values), index), values, color="black", s=15)
-        axis.set_xticks(np.arange(len(methods)), [labels[method] for method in methods])
-        axis.set_title(title)
-        if metric != "discounted_return":
-            axis.set_ylim(0, 1.02)
-    fig.suptitle("Independent random rollouts; dots denote independent seeds")
-    return fig
-
-
-def plot_comparison(data_file=None, window=100, delta_R=0.05):
-    """Load comparison.pkl and save the three requested figures as PNG and PDF."""
-    if data_file is None:
-        data_file = Path(__file__).resolve().parent / "saved_results/online_comparison"
-        data_file = data_file / "comparison.pkl"
-    data_file = Path(data_file)
-    with data_file.open("rb") as file:
-        runs = pickle.load(file)
-    proposed = [run for run in runs if run["method"] == "proposed"]
-    figures = {}
-    if proposed:
-        figures["r_estimation"] = plot_R(proposed, delta_R)
-        figures["acp_calibration"] = plot_calibration(proposed, window)
-    if all(run["evaluation"] is not None for run in runs):
-        figures["policy_comparison"] = plot_performance(runs)
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend(fontsize=8)
         for extension in ("png", "pdf"):
-            fig.savefig(data_file.parent / f"{name}.{extension}", dpi=180)
+            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)
 
 

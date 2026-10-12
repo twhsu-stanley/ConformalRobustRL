@@ -12,7 +12,7 @@ class ConformallyRobustController:
     Algorithm 2 starts Algorithm 1 from zero every episode; the nominal baseline
     reuses its fixed policy. The MDP supplies clone() and deploy_policy(). Only
     actual deployment transitions enter the mismatch estimate; pilot calibration
-    and evaluation do not. Episodes stop at a terminal condition, with horizon
+    does not. Episodes stop at a terminal condition, with horizon
     acting as a step limit. R uses the total observed transition count tau_k.
 
     R/C=None selects online estimation/calibration; numeric values hold them fixed.

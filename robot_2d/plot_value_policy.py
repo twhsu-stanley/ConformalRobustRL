@@ -16,7 +16,7 @@ from robot_2d.utils import plot_robot_2d_tabular
 def main(*, R=0.2, C=1.0, trial=0, data_dir=None, show=True):
     """Load one saved trial, plot its values and policy, and save the figure."""
     if data_dir is None:
-        data_dir = Path(__file__).resolve().parent / "saved_results"
+        data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
     data_dir = Path(data_dir)
     filename = data_dir / f"robot_2d_R{R}_C{C}_agents.pkl"
     with open(filename, "rb") as f:

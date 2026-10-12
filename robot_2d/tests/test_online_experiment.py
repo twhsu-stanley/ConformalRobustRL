@@ -3,11 +3,12 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
-from robot_2d.main_robot_2d_online import evaluate_policy, main
+from robot_2d.main_robot_2d_online import main
 from robot_2d.plot_online_comparison import mismatch_probabilities
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
@@ -101,18 +102,6 @@ class ContinuousDeploymentTests(unittest.TestCase):
             self.assertAlmostEqual(probabilities[mdp.cell_to_state(cell), action], 0.2336854404)
         np.testing.assert_array_equal(probabilities[mdp.failure_state], 0)
 
-    def test_workspace_exit_is_reported_separately_in_evaluation(self):
-        mdp = Robot2DMotionMDP(
-            noise_sampler=lambda position, rng: np.array([-1.0, 0.0]),
-            max_episode_steps=4,
-        )
-        result = evaluate_policy(mdp, np.ones(mdp.n_state, dtype=int), 0.95, 5,
-                                 np.random.default_rng(7))
-        self.assertEqual(result["workspace_exit_rate"], 1)
-        self.assertEqual(result["success_rate"], 0)
-        self.assertEqual(result["collision_rate"], 0)
-        self.assertEqual(result["timeout_rate"], 0)
-
     def test_time_limit_counts_only_nonterminal_transitions(self):
         mdp = Robot2DMotionMDP(
             noise_sampler=lambda position, rng: np.array([0.2, 0.0]), max_episode_steps=3,
@@ -126,14 +115,17 @@ class ContinuousDeploymentTests(unittest.TestCase):
 
 
 class OnlineSettingsTests(unittest.TestCase):
-    def test_baseline_settings_and_evaluation_do_not_change_estimator_counts(self):
-        with tempfile.TemporaryDirectory(prefix="robot_online_settings_") as directory:
+    def test_baseline_settings_preserve_estimator_counts(self):
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_online_settings_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+        ):
             for method in ("proposed", "nominal", "global"):
                 with self.subTest(method=method):
                     controller = main(
                         method=method, n_episodes=2, training_episodes=10, horizon=5,
-                        calibration_scores=[0.1] * 20, evaluation_episodes=8,
-                        output_dir=Path(directory) / method, save_plots=False, verbose=False,
+                        calibration_scores=[0.1] * 20,
+                        save_plots=False, verbose=False,
                     )
                     first, last = controller.history
                     count = first["episode_length"] + last["episode_length"]
@@ -151,24 +143,22 @@ class OnlineSettingsTests(unittest.TestCase):
                     if method == "global":
                         self.assertTrue(np.isposinf(last["planning_radius"]))
                         self.assertEqual(controller.agent.C, np.inf)
-                    evaluation = controller.results["evaluation"]
-                    self.assertAlmostEqual(sum(evaluation[key] for key in (
-                        "success_rate", "collision_rate", "workspace_exit_rate", "timeout_rate",
-                    )), 1)
 
     def test_fixed_parameters_and_ACP_update_order(self):
-        with tempfile.TemporaryDirectory(prefix="robot_online_fixed_") as directory:
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_online_fixed_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+        ):
             fixed = main(
                 n_episodes=2, training_episodes=10, horizon=5, R=0.2, C=0.7,
                 calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
-                output_dir=Path(directory) / "fixed",
             )
             self.assertTrue(all(row["R_used"] == 0.2 for row in fixed.history))
             self.assertTrue(all(row["planning_radius"] == 0.7 for row in fixed.history))
             self.assertEqual(fixed.calibrator.delta, 0.1)
             adaptive = main(
                 n_episodes=2, training_episodes=10, horizon=5, calibration_scores=[0.1] * 20,
-                save_plots=False, verbose=False, output_dir=Path(directory) / "adaptive",
+                save_plots=False, verbose=False,
             )
             self.assertEqual(adaptive.history[0]["conformal_radius"], 0.1)
             coverage = 1 - np.mean([row["miscoverage"] for row in adaptive.history])
@@ -180,13 +170,16 @@ class OnlineSettingsTests(unittest.TestCase):
             "nominal": dict(method="nominal"), "global": dict(method="global"),
             "fixed": dict(R=0.2, C=0.7),
         }
-        with tempfile.TemporaryDirectory(prefix="robot_online_continue_") as directory:
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_online_continue_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+        ):
             for name, settings in cases.items():
                 with self.subTest(setting=name):
                     controller = main(
                         n_episodes=1, training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
-                        output_dir=Path(directory) / name, **settings,
+                        **settings,
                     )
                     previous_agent = controller.agent
                     previous_count = controller.transition_count

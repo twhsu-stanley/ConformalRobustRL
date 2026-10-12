@@ -22,12 +22,15 @@ The robot scripts also support direct execution and an editor's Run Python File 
 
 ```powershell
 python -m robot_2d.main_robot_2d_online
+python -m robot_2d.plot_online_comparison
 ```
 
 The settings at the bottom of `robot_2d/main_robot_2d_online.py` run three methods
-for seeds `(7, 8, 9)`, with 30 outer episodes, 4,000 inner training episodes per
-training call, 100 pilot episodes, and 500 final-policy evaluation episodes.
-Results and comparison figures go to `robot_2d/saved_results/online_comparison/`.
+for seeds `(87,)`, with 30 outer episodes, 4,000 inner training episodes per
+training call and 100 pilot episodes.
+All online results and figures go to `robot_2d/saved_results/online/`.
+Each call to `main()` saves one file named
+`results_{method}_R{R}_C{C}_trial_{trial}.pkl`. Seeds are stored in the data.
 These defaults provide a starting experiment; increase the outer episode and seed
 counts for stronger calibration and performance evidence.
 
@@ -40,14 +43,14 @@ for a single run. For example:
 from robot_2d.main_robot_2d_online import main
 from robot_2d.plot_online_comparison import plot_comparison
 
-# Run Algorithm 2 alone, with independent evaluation of its final policy.
+# Run Algorithm 2 alone.
 controller = main(
     n_episodes=30, training_episodes=4000, pilot_episodes=100,
-    evaluation_episodes=500, save_plots=False,
+    save_plots=False,
 )
 
 # Replot saved comparisons without training or deployment.
-plot_comparison('robot_2d/saved_results/online_comparison/comparison.pkl')
+plot_comparison()
 ```
 
 `main()` returns the controller. Its experiment settings persist when calling
@@ -97,22 +100,21 @@ With `C=None`, ACP diagnostics are still collected for the nominal and global me
 | `calibration_scores` | `None` | Optional initial episode maximum deviations |
 | `noise_probability` | 0.3 | Simulator disturbance injection probability |
 | `noise_radius` | 1.2 | Simulator disk support radius |
-| `evaluation_episodes` | 0 | Independent final-policy rollouts; 0 skips evaluation |
 | `seed` | 7 | Random seed for a single run |
+| `trial` | 1 | Trial number used in the saved filename |
 | `save_plots` | `True` | Save the two single-run figures |
 | `verbose` | `True` | Print episode progress and the saved path |
 
-The script entry point runs all three methods for seeds `(7, 8, 9)`, with 500
-final-policy evaluation episodes. Its comparison loop calls `main()` and combines
-the saved results. The script explicitly sets 100 pilots; calling `main()`
+The script entry point runs all three methods for seeds `(87,)`.
+It calls `main()` once per method and trial;
+each call saves its own file. The script explicitly sets 100 pilots; calling `main()`
 without that override uses the 20-pilot function default.
 
 Within each comparison trial, methods share the initial pilot calibration scores.
 Each method maintains its own subsequent R estimate and calibration history.
 Simulation draws ordinary random disturbances, with separate run seeds for the
-methods and fresh draws for evaluation. No disturbance tapes are used. The stored
-`trial_seed` groups methods for comparison; the actual run seed is
-`trial_seed + 100000 * method_index` in the requested method order.
+methods. No disturbance tapes are used. The stored
+run seed is `seed + 100000 * method_index` in the requested method order.
 All methods deploy under the same specified physical noise law.
 
 ## Robot model and continuous deployment
@@ -188,10 +190,10 @@ rectangular grids account for both cell widths.
 ## Implementation and update order
 
 `main_robot_2d_online.py` configures `ConformallyRobustController`, calls its
-`run()`, then evaluates, saves, and plots. The controller's `run_episode()` is the
+`run()`, then saves and plots. The controller's `run_episode()` is the
 single implementation of training and R/ACP updates for all experiment settings.
 `Robot2DMotionMDP.deploy_policy()` is the single continuous rollout routine shared
-by random-policy pilots, online deployment, and frozen-policy evaluation.
+by random-policy pilots and online deployment.
 Robot-specific dynamics and plotting remain under `robot_2d/`.
 
 For each proposed or global episode:
@@ -205,8 +207,7 @@ For each proposed or global episode:
 5. Compute the maximum continuous deviation over the episode, score the
    pre-episode prediction, and update ACP and its score window.
 
-Pilot and evaluation transitions never enter the R estimator. Evaluation freezes
-the final policy and never updates R or ACP. All actual online transitions enter R.
+Pilot transitions never enter the R estimator. All actual online transitions enter R.
 The calibration window applies only to C scores; R uses the entire online history.
 The step limit ensures a finite episode length, as required by Assumption 6;
 episodes contain at least one transition and need not have a common length.
@@ -221,8 +222,9 @@ and unvisited pairs when selecting a common training budget across methods.
 
 ## Figures and what they establish
 
-The separate `plot_online_comparison.py` loads `comparison.pkl` and writes three
-figures in PNG and PDF formats. It does not run the robot or retrain policies.
+The separate `plot_online_comparison.py` reads the per-run files from
+`saved_results/online/` and writes the R and ACP figures in PNG and PDF formats there.
+Its paths are fixed relative to the script. It does not run the robot or retrain policies.
 
 ### R estimation: `r_estimation`
 
@@ -230,7 +232,7 @@ The first panel shows individual seed estimates, their mean, and the common true
 The second shows each seed's absolute estimation error against its own cumulative
 transition count tau_k, together with the simultaneous bound from Lemma 5:
 `sqrt(log(2*tau_k*(tau_k+1)/delta_R)/(2*tau_k))`.
-`plot_comparison(..., delta_R=0.05)` sets its confidence parameter. The bound
+`plot_comparison(delta_R=0.05)` sets its confidence parameter. The bound
 applies to each run; it is not a joint confidence statement across seeds.
 
 The disturbance injection probability 0.3 is not the discrete mismatch probability.
@@ -263,7 +265,7 @@ The four panels show first-seed continuous episode scores and pre-episode radii,
 cumulative episode coverage, trailing-window coverage, and the mean number of
 states in localized neighborhoods compared with the 65-state global support.
 The support-size diagnostic averages over nominal targets of nonterminal
-state-action pairs. `plot_comparison(..., window=100)` controls the trailing
+state-action pairs. `plot_comparison(window=100)` controls the trailing
 coverage window independently of the calibration window used during the run.
 
 Coverage compares ACP with a rolling quantile at the fixed target failure
@@ -298,47 +300,9 @@ short window. Assess coverage together with prediction efficiency and extended
 prediction tails. Under a stationary law, a frozen quantile may already work well;
 improved ACP performance must be demonstrated by the data.
 
-### Navigation comparison: `policy_comparison`
-
-Each method's final policy is evaluated on fresh random rollouts under the same
-specified noise law. Bars show means across run seeds; dots show individual seed
-results. The six displayed quantities are:
-
-| Quantity | Meaning |
-| --- | --- |
-| Goal success | Fraction ending at the actual goal |
-| Collision | Fraction entering an actual obstacle cell |
-| Workspace exit | Fraction ending outside the workspace |
-| Timeout | Fraction reaching the step limit without another terminal event |
-| Actual discounted reward | Mean of `sum_t gamma^t r(s_t,a_t)` during deployment |
-| Discounted actual goal arrival | Mean of `gamma^(T_goal-1)` for successes and 0 for failures |
-
-Saved evaluation data also include the mean of the worst 10% of discounted returns,
-using fractional tail mass when necessary. Evaluation also saves mean episode
-length. Goal, collision, exit, and timeout are mutually exclusive outcomes whose
-rates sum to one. Histories retain episode lengths and the terminal event step.
-Returns include only the transitions actually taken in one uninterrupted rollout.
-Examine all outcomes and reward together.
-
-The current performance figure compares final policies; it does not evaluate
-checkpoint policies throughout training or add confidence intervals. To assess
-repeatability, increase independent run seeds and evaluation rollouts. Independent
-training/deployment trials, rather than overlapping episode windows, are the units
-for uncertainty across seeds. Learned robust values alone do not establish better
-physical performance, and a short development run is not conclusive evidence.
-
-For this nonnegative-reward map, nominal terminal states have robust V=0, so the global worst
-case has `min_s V(s)=0`. Its Bellman target reduces to
-`r(s,a)+gamma*(1-R)*V(f(s,a))`. Global and nominal planning can therefore select
-the same route, depending on action ties and finite training. Localization can
-distinguish nearby obstacle exposure; globally depressed planning values do not
-by themselves establish poor deployed navigation. Report the observed comparison.
-
-The R and ACP figures use runs labeled `proposed`. The performance figure is
-produced only when every saved run has final evaluation data. To obtain all three,
-include the proposed method and set `evaluation_episodes` to a positive number.
-Single-run `main(save_plots=True)` instead saves `online_uncertainty.png` and
-`final_policy.png`.
+The R and ACP figures use runs labeled `proposed`.
+Single-run `main(save_plots=True)` saves `online_uncertainty_{test}.png` and
+`final_policy_{test}.png`, where `{test}` is the method, R/C setting, and trial.
 
 ## Distribution shifts with a fixed true R
 
@@ -367,19 +331,24 @@ Q-learning accuracy.
 
 ## Saved data and paths
 
-Default paths are resolved relative to the scripts, independently of the working
-directory. A user-supplied relative `output_dir` is relative to the working directory.
+All Algorithm 2 output uses the fixed folder `robot_2d/saved_results/online/`,
+independently of the working directory. Each `main()` call saves one results dictionary
+in `results_{method}_R{R}_C{C}_trial_{trial}.pkl`. For example:
 
-| Run | Default directory | Files |
-| --- | --- | --- |
-| `main(method='proposed')` | `robot_2d/saved_results/online/` | `results.pkl`, `final_policy.npz`, optional single-run PNGs |
-| `main(method='nominal'/'global')` | Corresponding subfolder of `online/` | Same per-run files |
-| Script comparison | `robot_2d/saved_results/online_comparison/` | Per-method/trial folders, `comparison.pkl`, comparison PNGs/PDFs |
+- `results_proposed_RNone_CNone_trial_1.pkl`: online R estimation and ACP.
+- `results_nominal_RNone_CNone_trial_1.pkl`: nominal baseline.
+- `results_global_RNone_CNone_trial_1.pkl`: global R-contamination baseline.
+- `results_proposed_R0.2_C0.7_trial_1.pkl`: fixed R/C experiment.
 
-`results.pkl` contains settings, the configured MDP, initial and pilot scores,
-final R and ACP parameter, full online histories, final Q/policy, and optional
-evaluation metrics and samples. `final_policy.npz` contains Q, policy, and
-state-action visit counts. Q has shape `(65, 4)` and policy has shape `(65,)` on the
+`None` in the filename denotes an unspecified planning parameter; method overrides
+still determine nominal and global planning. The R/ACP plotter uses the fixed
+pattern `results_proposed_RNone_CNone_trial_*.pkl`, including all matching trials.
+Edit that pattern in the plotter to select other tests.
+
+Each run record contains settings, the configured MDP, initial and pilot scores,
+final R and ACP parameter, full online histories, final Q/policy, state-action
+visit counts.
+Q has shape `(65, 4)` and policy has shape `(65,)` on the
 default grid; the failure row is zero. Each history records pre-episode planning R/C, raw
 conformal radius, score, miscoverage, ACP parameters before/after, cumulative
 counts, training diagnostics, original deviation vectors, continuous positions,
@@ -388,25 +357,24 @@ extended-grid quantized positions, episode length, and terminal outcome.
 landing, including the terminal landing; they have length `episode_length + 1`.
 The disturbance, action, reward, and mismatch arrays have length `episode_length`.
 Trajectory plots connect these successive positions directly.
-`comparison.pkl` collects run records and adds the grouping `trial_seed`.
+
+Single-run figures use the same method, R/C, and trial suffix as the results file.
+Comparison figures are `r_estimation` and `acp_calibration`,
+each in PNG and PDF format. These figures share the same folder as the result files.
 
 ```python
 import pickle
-import numpy as np
-
-with open('robot_2d/saved_results/online_comparison/comparison.pkl', 'rb') as file:
-    runs = pickle.load(file)
-first_run = runs[0]
-history = first_run['history']
-evaluation = first_run['evaluation']
-
-with np.load('robot_2d/saved_results/online/final_policy.npz') as file:
-    Q, policy = file['Q'], file['policy']
+filename = 'robot_2d/saved_results/online/results_proposed_RNone_CNone_trial_1.pkl'
+with open(filename, 'rb') as file:
+    results = pickle.load(file)
+history = results['history']
+Q, policy = results['Q'], results['policy']
+visit_counts = results['visit_counts']
 ```
 
-These paths describe different example runs; use the per-method folder for a
-policy saved by the comparison script. Rerunning with the same output directory
-replaces files at those names, so use distinct directories for separate experiments.
+Running the same method, R/C setting, and trial again replaces that file. Choose a
+different trial number to retain another run. The script numbers trials from one,
+independently of their seeds. The comparison plotter reads the matching files directly.
 Results from previous projected, padded, or resetting deployments require rerunning
 to produce the current terminal episodes, transition counts, and trajectory fields.
 
@@ -423,7 +391,7 @@ from robot_2d.main_robot_2d import main as train_fixed
 curves = train_fixed(R=0.15, C=1.2, training_episodes=2000, n_trials=1)
 ```
 
-Each call saves `robot_2d_R{R}_C{C}.pkl` under `robot_2d/saved_results/`, containing
+Each call saves `robot_2d_R{R}_C{C}.pkl` under `robot_2d/saved_results/fixedRC/`, containing
 one initial-state value curve per trial. Each starts at zero and records
 `max_a Q(start,a)` after every training transition. Its index is cumulative
 training steps; the agent attribute `evaluation_return` is this learned value,

@@ -263,11 +263,12 @@ class ResultsDirectoryTests(unittest.TestCase):
                             n_episodes=1, training_episodes=10, horizon=5, pilot_episodes=2,
                         )
                 files = [path for path in root.rglob("*") if path.is_file()]
-                self.assertEqual(len(files), 17)
+                self.assertEqual(len(files), 16)
                 self.assertTrue(all(path.is_relative_to(saved_dir) for path in files))
                 self.assertFalse(list(working_directory.iterdir()))
                 self.assertTrue(all(path.stat().st_size > 0 for path in files))
-                self.assertTrue((saved_dir / "online" / "results.pkl").is_file())
+                filename = saved_dir / "online/results_proposed_RNone_CNone_trial_1.pkl"
+                self.assertTrue(filename.is_file())
             finally:
                 os.chdir(previous_directory)
 
@@ -294,17 +295,21 @@ class ValuePolicyPlotTests(unittest.TestCase):
 
 class OnlineRunnerTests(unittest.TestCase):
     def test_runner_saves_single_and_multiple_episode_results_without_MDP_JSON(self):
-        with tempfile.TemporaryDirectory(prefix="robot_motion_tests_") as directory:
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_motion_tests_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+        ):
             root = Path(directory)
             for n_episodes in (1, 2):
                 with self.subTest(n_episodes=n_episodes):
-                    output_dir = root / str(n_episodes)
+                    output_dir = root / "saved_results/online"
                     with redirect_stdout(io.StringIO()):
                         controller = online_main(
                             training_episodes=10, horizon=5, n_episodes=n_episodes,
-                            pilot_episodes=2, save_plots=False, output_dir=output_dir,
+                            pilot_episodes=2, save_plots=False, trial=n_episodes,
                         )
-                    with (output_dir / "results.pkl").open("rb") as file:
+                    filename = f"results_proposed_RNone_CNone_trial_{n_episodes}.pkl"
+                    with (output_dir / filename).open("rb") as file:
                         results = pickle.load(file)
                     history = results["history"]
                     self.assertEqual(len(history), n_episodes)
@@ -316,10 +321,15 @@ class OnlineRunnerTests(unittest.TestCase):
                     )
                     self.assertEqual(results["final_R"], controller.R_estimate)
                     self.assertEqual(results["final_delta"], controller.calibrator.delta)
-                    with np.load(output_dir / "final_policy.npz") as saved:
-                        self.assertEqual(saved["Q"].shape, (65, 4))
-                        self.assertEqual(saved["policy"].shape, (65,))
-                        np.testing.assert_array_equal(saved["Q"], controller.Q)
+                    self.assertNotIn("evaluation", results)
+                    self.assertFalse(hasattr(controller, "results"))
+                    self.assertEqual(results["Q"].shape, (65, 4))
+                    self.assertEqual(results["policy"].shape, (65,))
+                    np.testing.assert_array_equal(results["Q"], controller.Q)
+                    np.testing.assert_array_equal(results["policy"], controller.policy)
+                    np.testing.assert_array_equal(results["visit_counts"],
+                                                  controller.agent.visit_counts)
+                    self.assertEqual(len(list(output_dir.iterdir())), n_episodes)
             self.assertFalse(list(root.rglob("*.json")))
 
 if __name__ == "__main__":

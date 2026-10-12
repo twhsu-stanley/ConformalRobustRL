@@ -15,7 +15,7 @@ from utils_tabular import calc_evaluation_return_mean_std
 
 def main(*, data_dir=None, show=True):
     if data_dir is None:
-        data_dir = Path(__file__).resolve().parent / "saved_results"
+        data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
     data_dir = Path(data_dir)
     comparisons = (
         (

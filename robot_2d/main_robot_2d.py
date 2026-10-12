@@ -20,7 +20,7 @@ def main(
     if not isinstance(n_trials, (int, np.integer)) or n_trials < 1:
         raise ValueError("n_trials must be a positive integer.")
     if output_dir is None:
-        output_dir = Path(__file__).resolve().parent / "saved_results"
+        output_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     mdp = Robot2DMotionMDP(
