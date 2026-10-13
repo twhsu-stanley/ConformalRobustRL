@@ -1,6 +1,7 @@
 """General robust tabular Q-learning checks using small nominal MDP fixtures."""
 
 import unittest
+from unittest.mock import patch
 
 import gymnasium as gym
 import numpy as np
@@ -17,7 +18,7 @@ def reference_q(mdp, gamma, R, C):
         for state in mdp.trainable_states:
             for action in range(4):
                 nominal = mdp.nominal_next_state(state, action)
-                candidates = mdp.localized_uncertainty_states(state, action, C)
+                candidates = mdp.localized_uncertainty_states(nominal, C)
                 worst_value = np.min(values[candidates])
                 continuation = (1 - R) * values[nominal] + R * worst_value
                 Q[state, action] = mdp.reward(state, action) + gamma * continuation
@@ -77,13 +78,24 @@ class RobustQLearningTests(unittest.TestCase):
         agent.robust_q_learning(n_pairs, record_every=100)
         self.assertTrue(np.all(agent.visit_counts[~mdp.terminal_mask] >= 1))
 
-    def test_frozenlake_fixed_parameter_api_remains_usable(self):
+    def test_agent_uses_the_MDP_uncertainty_set(self):
+        mdp = self.small_mdp()
+        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
+        values = np.array((0.4, 0.8, 0.2, 0, 0))
+        with patch.object(
+            mdp, "localized_uncertainty_states", return_value=np.array([2]),
+        ) as states:
+            target = agent.robust_td_target(0.1, 1, values)
+        states.assert_called_once_with(1, 0.6)
+        self.assertAlmostEqual(target, 0.1 + 0.9 * (0.75 * 0.8 + 0.25 * 0.2))
+
+    def test_environment_must_supply_the_MDP_definitions(self):
         env = gym.make("FrozenLake-v1", is_slippery=False, max_episode_steps=20)
-        agent = Tabular_Agent(env, 0.95, 0.5, R=0.1, C=1, seed=1)
-        Q, policy = agent.robust_q_learning(5)
-        self.assertEqual(Q.shape, (16, 4))
-        self.assertEqual(policy.shape, (16,))
-        env.close()
+        try:
+            with self.assertRaisesRegex(ValueError, "The MDP must define reward"):
+                Tabular_Agent(env, 0.95, 0.5, R=0.1, C=1, seed=1)
+        finally:
+            env.close()
 
 if __name__ == "__main__":
     unittest.main()

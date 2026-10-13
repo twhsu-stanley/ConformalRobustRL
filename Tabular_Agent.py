@@ -8,6 +8,8 @@ def is_first_visit(state_hist, action_hist, t):
     return True
 
 class Tabular_Agent:
+    """Learn Q-values using the supplied MDP's reward, terminal rules, and uncertainty set."""
+
     def __init__(
         self,
         env: gym.Env,
@@ -22,6 +24,11 @@ class Tabular_Agent:
         seed=None,
     ):
         self.env = env
+        for name in (
+            "reward", "terminal_mask", "state_coordinates", "localized_uncertainty_states",
+        ):
+            if not hasattr(env.unwrapped, name):
+                raise ValueError(f"The MDP must define {name}.")
         self.gamma = gamma
         self.n_state = env.observation_space.n
         self.n_action = env.action_space.n
@@ -36,8 +43,6 @@ class Tabular_Agent:
         self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.initial_state = int(getattr(env.unwrapped, "start_state", 0))
-        self.terminal_mask = self._build_terminal_mask()
-        self._uncertainty_cache = {}
         self.training_diagnostics = {}
 
         self.Q = np.zeros((self.n_state, self.n_action))
@@ -61,7 +66,6 @@ class Tabular_Agent:
         self.R = R # Contamination level for the R-C uncertainty set
         self.C = C # Deviation radius for the R-C uncertainty set
         self._validate_uncertainty(R, C)
-        self.state_coordinates = self._build_state_coordinates()
 
     @staticmethod
     def _validate_uncertainty(R, C):
@@ -69,60 +73,6 @@ class Tabular_Agent:
             raise ValueError("Contamination level R must be in [0, 1].")
         if np.isnan(C) or C < 0:
             raise ValueError("Deviation radius C must be nonnegative, or positive infinity.")
-
-    def _build_terminal_mask(self):
-        base = self.env.unwrapped
-        if hasattr(base, "terminal_mask"):
-            return np.asarray(base.terminal_mask, dtype=bool).copy()
-        if hasattr(base, "desc"):
-            return np.isin(base.desc.astype(str).ravel(), ("H", "G"))
-        return np.zeros(self.n_state, dtype=bool)
-
-    def _build_state_coordinates(self):
-        """Return coordinates used by the R-C model distance metric.
-
-        For FrozenLake-like grid environments, states are mapped to
-        (row, col) grid coordinates. For other tabular environments, the
-        fallback is a one-dimensional coordinate equal to the state index.
-        """
-        if hasattr(self.env.unwrapped, "state_coordinates"):
-            return np.asarray(self.env.unwrapped.state_coordinates, dtype=float).copy()
-        if hasattr(self.env.unwrapped, "desc"):
-            n_row, n_col = self.env.unwrapped.desc.shape
-            return np.array(
-                [[state // n_col, state % n_col] for state in range(self.n_state)],
-                dtype=float,
-            )
-
-        return np.arange(self.n_state, dtype=float).reshape(-1, 1)
-
-    def _localized_uncertainty_states(self, nominal_next_state, C=None):
-        """Use the environment's physical cell geometry, or legacy center distances.
-
-        In the deterministic simulator setting of Section IV-B, one observed
-        transition reveals f(s,a), so the observed next state is used as the
-        nominal next state. Setting C=np.inf recovers the original
-        R-contamination set over the whole state space.
-        """
-        if C is None:
-            C = self.C
-        self._validate_uncertainty(self.R, C)
-        nominal_next_state = int(nominal_next_state)
-        key = (nominal_next_state, float(C))
-        if key in self._uncertainty_cache:
-            return self._uncertainty_cache[key]
-        base = self.env.unwrapped
-        if hasattr(base, "localized_states_around"):
-            states = base.localized_states_around(nominal_next_state, C)
-        elif np.isposinf(C):
-            states = np.arange(self.n_state)
-        else:
-            distances = np.linalg.norm(
-                self.state_coordinates - self.state_coordinates[nominal_next_state], axis=1,
-            )
-            states = np.flatnonzero(distances <= C + 1e-12)
-        self._uncertainty_cache[key] = states
-        return states
 
     def epsilon_greedy_policy(self, state):
         if self.rng.random() < self.epsilon:
@@ -139,19 +89,19 @@ class Tabular_Agent:
         C = self.C if C is None else C
         if R == 0:
             return float(reward + self.gamma * values[nominal_next_state])
-        states = self._localized_uncertainty_states(nominal_next_state, C)
+        states = self.env.unwrapped.localized_uncertainty_states(nominal_next_state, C)
         next_value = (1 - R) * values[nominal_next_state] + R * np.min(values[states])
         return float(reward + self.gamma * next_value)
 
     def robust_bellman_residual(self):
         """Use the nominal model only to diagnose finite-training approximation error."""
         base = self.env.unwrapped
-        if not hasattr(base, "nominal_next_state") or not hasattr(base, "reward"):
+        if not hasattr(base, "nominal_next_state"):
             return None
         values = np.max(self.Q, axis=1)
-        values[self.terminal_mask] = 0.0
+        values[base.terminal_mask] = 0.0
         residual = 0.0
-        for state in np.flatnonzero(~self.terminal_mask):
+        for state in np.flatnonzero(~base.terminal_mask):
             for action in range(self.n_action):
                 successor = base.nominal_next_state(state, action)
                 target = self.robust_td_target(base.reward(state, action), successor, values)
@@ -191,7 +141,6 @@ class Tabular_Agent:
         self.lr = self.lr_init
         self.epsilon = self.epsilon_init
         self.rng = np.random.default_rng(self.seed)
-        self._uncertainty_cache.clear()
         self.evaluation_return = [0.0]
         self.evaluation_steps = [0]
         visits = np.zeros_like(self.Q, dtype=int)
@@ -229,7 +178,7 @@ class Tabular_Agent:
                 target = self.robust_td_target(reward, successor, values)
                 self.Q[state, action] += self.lr * (target - self.Q[state, action])
                 values[state] = np.max(self.Q[state])
-                values[self.terminal_mask] = 0.0
+                values[base.terminal_mask] = 0.0
                 cumulative_step += 1
                 if cumulative_step % record_every == 0:
                     self.evaluation_return.append(float(values[self.initial_state]))
@@ -242,7 +191,7 @@ class Tabular_Agent:
             self.evaluation_return.append(float(values[self.initial_state]))
             self.evaluation_steps.append(cumulative_step)
         self.visit_counts = visits
-        learnable_visits = visits[~self.terminal_mask]
+        learnable_visits = visits[~base.terminal_mask]
         self.training_diagnostics = {
             "episodes": int(n_episodes), "transitions": cumulative_step,
             "minimum_visits": int(np.min(learnable_visits)),
@@ -252,100 +201,3 @@ class Tabular_Agent:
             "zero_initialized": True, "R": float(self.R), "C": float(self.C),
         }
         return self.Q.copy(), np.argmax(self.Q, axis=1)
-
-    def _set_env_state(self, state):
-        """Set the underlying tabular environment state when supported."""
-        if hasattr(self.env.unwrapped, "s"):
-            self.env.unwrapped.s = int(state)
-
-    def _reward_done_from_state(self, state):
-        """Return FrozenLake-style reward/done for an arbitrary state.
-
-        FrozenLake rewards and termination depend on the tile reached, so when
-        sim_perturbed manually replaces the nominal next state with an R-C
-        perturbed next state, the reward and terminal flag must be recomputed.
-        For non-FrozenLake tabular environments, return None so the caller can
-        keep the environment-provided reward/done values.
-        """
-        if not hasattr(self.env.unwrapped, "desc"):
-            return None
-
-        desc = self.env.unwrapped.desc
-        _, n_col = desc.shape
-        row, col = divmod(int(state), n_col)
-        tile = desc[row, col]
-        if isinstance(tile, bytes):
-            tile = tile.decode("utf-8")
-        elif hasattr(tile, "item"):
-            tile = tile.item()
-            if isinstance(tile, bytes):
-                tile = tile.decode("utf-8")
-
-        reward = 1.0 if tile == "G" else 0.0
-        done = tile in {"H", "G"}
-        return reward, done
-
-    def sim_perturbed(self, p=None, C=None):
-        """Evaluate the greedy policy in an R-C perturbed environment.
-
-        At each step, the agent first selects the greedy action. The simulator
-        produces the nominal deterministic next state s' = f(s,a). With
-        probability p, nature replaces s' with the worst-value state inside
-
-            C(s,a) = {s_tilde : ||s' - s_tilde|| <= C}.
-
-        With probability 1-p, the nominal transition is used. This matches the
-        localized R-C perturbation model used by robust_q_learning.
-        """
-        if p is None:
-            p = self.R
-
-        if C is None:
-            C = self.C
-
-        if not 0.0 <= p <= 1.0:
-            raise ValueError("Perturbation probability p must be in [0, 1].")
-
-        # Initialize the environment and state.
-        state, info = self.env.reset() # starting state at 0
-
-        G = 0
-        I = 1
-        V = np.max(self.Q, axis=1)
-        while True:
-            # Agent acts according to its learned greedy policy.
-            action = np.argmax(self.Q[state, :])
-
-            # First take the nominal simulator transition to obtain f(s,a).
-            nominal_next_state, reward, done, truncated, info = self.env.step(action)
-            state_plus = int(nominal_next_state)
-
-            if np.random.rand() <= p:
-                # R-C perturbation: adversarially choose the lowest-value state
-                # within radius C of the nominal next state f(s,a).
-                uncertainty_states = self._localized_uncertainty_states(state_plus, C)
-                local_values = V[uncertainty_states]
-                min_value = np.min(local_values)
-                worst_states = uncertainty_states[np.isclose(local_values, min_value)]
-                state_plus = int(np.random.choice(worst_states))
-
-                # Keep the wrapped simulator state consistent with the
-                # manually perturbed next state.
-                self._set_env_state(state_plus)
-
-                # For FrozenLake, recompute reward/termination for the perturbed
-                # next state. For unsupported environments, keep env.step values.
-                reward_done = self._reward_done_from_state(state_plus)
-                if reward_done is not None:
-                    reward, done = reward_done
-
-            G += I * reward
-            I = I * self.gamma
-
-            # Move to the next state.
-            state = state_plus
-
-            if done or truncated:
-                break
-
-        return G

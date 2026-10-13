@@ -196,6 +196,15 @@ single implementation of training and R/ACP updates for all experiment settings.
 by random-policy pilots and online deployment.
 Robot-specific dynamics and plotting remain under `robot_2d/`.
 
+The MDP owns `reward(state, action)`, `terminal_mask`, `state_coordinates`, and
+`localized_uncertainty_states(nominal_next_state, C)`. The last method returns
+candidate state indices around the observed nominal successor and caches them in
+the MDP. `Tabular_Agent` uses these definitions directly; it does not construct
+geometry, copy terminal masks, or infer task definitions from Gym environments.
+Training uses rewards returned by `env.step()` and the MDP's terminal mask;
+Bellman diagnostics use `env.reward()`. Environments must supply this interface
+explicitly, including when adapting a bare Gym environment such as FrozenLake.
+
 For each proposed or global episode:
 
 1. Predict the conformal radius using scores available before deployment, and

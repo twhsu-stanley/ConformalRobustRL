@@ -196,27 +196,30 @@ class Robot2DMotionMDP(gym.Env):
     def reward(self, state, action):
         return float(self.rewards[self._validate_state(state), self._validate_action(action)])
 
-    def localized_states_around(self, nominal_state, radius):
-        """Equation (4): include every cell intersected by the continuous deviation ball."""
-        if np.isnan(radius) or radius < 0:
+    def localized_uncertainty_states(self, nominal_next_state, C):
+        """Return cells intersecting the deviation ball, including reachable exit outcomes."""
+        if np.isnan(C) or C < 0:
             raise ValueError("Deviation radius must be nonnegative, or positive infinity.")
-        nominal_state = self._validate_state(nominal_state)
-        if np.isposinf(radius):
-            return np.arange(self.n_state)
-        if nominal_state == self.failure_state:
-            return np.array([self.failure_state])
-        center = self.coordinates(nominal_state)
-        offsets = np.abs(self.state_coordinates[:self.n_grid_states] - center)
-        distances = np.linalg.norm(np.maximum(offsets - self.cell_widths / 2, 0), axis=1)
-        states = np.flatnonzero(distances <= radius + 1e-12)
-        crosses_lower = radius > np.min(center) + 1e-12
-        reaches_upper = radius >= np.min(self.bounds - center) - 1e-12
-        if crosses_lower or reaches_upper:
-            states = np.append(states, self.failure_state)
+        nominal_next_state = self._validate_state(nominal_next_state)
+        cache = self.__dict__.setdefault("_uncertainty_cache", {})
+        key = (nominal_next_state, float(C))
+        if key in cache:
+            return cache[key]
+        if np.isposinf(C):
+            states = np.arange(self.n_state)
+        elif nominal_next_state == self.failure_state:
+            states = np.array([self.failure_state])
+        else:
+            center = self.coordinates(nominal_next_state)
+            offsets = np.abs(self.state_coordinates[:self.n_grid_states] - center)
+            distances = np.linalg.norm(np.maximum(offsets - self.cell_widths / 2, 0), axis=1)
+            states = np.flatnonzero(distances <= C + 1e-12)
+            crosses_lower = C > np.min(center) + 1e-12
+            reaches_upper = C >= np.min(self.bounds - center) - 1e-12
+            if crosses_lower or reaches_upper:
+                states = np.append(states, self.failure_state)
+        cache[key] = states
         return states
-
-    def localized_uncertainty_states(self, state, action, radius):
-        return self.localized_states_around(self.nominal_next_state(state, action), radius)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)

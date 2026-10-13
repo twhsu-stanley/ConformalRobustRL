@@ -119,19 +119,21 @@ class RobotMotionModelTests(unittest.TestCase):
     def test_cell_intersection_includes_cells_with_distant_centers(self):
         mdp = Robot2DMotionMDP()
         center = mdp.cell_to_state((3, 3))
-        self.assertEqual(set(mdp.localized_states_around(center, 0.6)), {19, 26, 27, 28, 35})
-        self.assertEqual(mdp.localized_states_around(center, 0).tolist(), [center])
-        self.assertEqual(len(mdp.localized_states_around(center, np.inf)), 65)
+        self.assertEqual(set(mdp.localized_uncertainty_states(center, 0.6)), {19, 26, 27, 28, 35})
+        self.assertEqual(mdp.localized_uncertainty_states(center, 0).tolist(), [center])
+        self.assertEqual(len(mdp.localized_uncertainty_states(center, np.inf)), 65)
         mdp = Robot2DMotionMDP(x_max=4, y_max=2, grid_shape=(2, 2))
-        self.assertEqual(mdp.localized_states_around(0, 0.6).tolist(), [0, 2, mdp.failure_state])
+        self.assertEqual(
+            mdp.localized_uncertainty_states(0, 0.6).tolist(), [0, 2, mdp.failure_state],
+        )
 
     def test_robust_planning_accounts_for_workspace_exit(self):
         mdp = Robot2DMotionMDP(obstacles=[])
         edge = mdp.cell_to_state((0, 2))
-        self.assertNotIn(mdp.failure_state, mdp.localized_states_around(edge, 0.5))
-        self.assertIn(mdp.failure_state, mdp.localized_states_around(edge, 0.6))
+        self.assertNotIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.5))
+        self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.6))
         upper_edge = mdp.cell_to_state((7, 2))
-        self.assertIn(mdp.failure_state, mdp.localized_states_around(upper_edge, 0.5))
+        self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(upper_edge, 0.5))
         agent = Tabular_Agent(mdp, gamma=0.9, lr_init=0.5, R=0.25, C=0.6)
         values = np.full(mdp.n_state, 0.8)
         values[mdp.terminal_mask] = 0

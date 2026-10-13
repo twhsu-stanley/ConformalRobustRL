@@ -121,7 +121,7 @@ def plot_calibration(runs, window):
             frozen.append(int(row["score"] > frozen_radius))
             quantile.scores.append(row["score"])
             mdp, radius = run["mdp"], row["planning_radius"]
-            counts = [len(mdp.localized_states_around(s, radius)) for s in range(mdp.n_state)]
+            counts = [len(mdp.localized_uncertainty_states(s, radius)) for s in range(mdp.n_state)]
             nominal_targets = mdp.nominal_transitions[mdp.trainable_states]
             support.append(np.mean(np.asarray(counts)[nominal_targets]))
         all_misses.append([row["miscoverage"] for row in run["history"]])
