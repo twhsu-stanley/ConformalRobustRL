@@ -54,6 +54,20 @@ class ContinuousDeploymentTests(unittest.TestCase):
         self.assertEqual(row["episode_length"], 1)
         np.testing.assert_allclose(mdp.position, (-0.5, 0.5))
 
+    def test_upper_boundary_landing_retains_the_observation_inside_closed_workspace(self):
+        mdp = Robot2DMotionMDP(
+            noise_sampler=lambda position, rng: np.array([0.5, 0.0]), max_episode_steps=1,
+        )
+        row = mdp.deploy_policy(lambda state: 0, 0.95, start_position=(6.5, 0.5))
+        np.testing.assert_array_equal(row["positions"], [(6.5, 0.5), (8, 0.5)])
+        np.testing.assert_array_equal(row["quantized_positions"], [(7.5, 0.5)])
+        np.testing.assert_array_equal(row["deviation_vectors"], [(0.5, 0)])
+        self.assertEqual(row["states"][-1], mdp.cell_to_state((7, 0)))
+        self.assertEqual(row["episode_mismatches"], 0)
+        self.assertEqual(row["score"], 0.5)
+        self.assertFalse(row["workspace_exit"])
+        self.assertTrue(row["timeout"])
+
     def test_obstacle_landing_is_recorded_as_the_last_transition(self):
         mdp = Robot2DMotionMDP(
             obstacles=[(1, 0)], noise_sampler=lambda position, rng: np.array([1.0, 0.0]),

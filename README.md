@@ -119,10 +119,12 @@ All methods deploy under the same specified physical noise law.
 
 ## Robot model and continuous deployment
 
-The workspace is `[0, 8) x [0, 8)`, divided into 8-by-8 unit cells. Half-open cells
-give a consistent tie convention at every grid boundary, including outside cells.
-Start and goal positions are `(0.5, 0.5)` and `(7.5, 7.5)`. Obstacle cells are
+The workspace is the closed rectangle `[0, 8] x [0, 8]`, divided into 8-by-8 unit cells.
+The uncertainty neighborhood uses closed grid cells. Discretization chooses the
+upper-index cell at internal ties and an interior cell at the upper workspace boundary.
+Start and goal positions are `(0.5, 0.5)` and `(7.5, 7.5)`. Default obstacle cells are
 `(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)`.
+The online comparison omits `(2, 1)`.
 Cells are indexed by `(ix, iy)` with discrete state `s = ix + nx * iy`.
 Actions `0, 1, 2, 3` command `+x, -x, +y, -y`, respectively.
 The additional state `failure_state=64` represents workspace exit, giving 65 Q-table
@@ -135,15 +137,20 @@ bounds, grid, obstacles, start/goal, or rewards.
 Section III defines the nominal dynamics as `F(x,a)=f(Phi(x),a)`:
 the action targets the neighboring cell center even when the current continuous
 position is away from its cell center. An outward command targets the current
-cell center. At the goal, `f(s,a)=s` for every action. `mdp.quantize(x)` extends Phi
-to the uniform grid throughout R^2, without clipping:
+cell center. At terminal states, the nominal model has self-loops, but no action is
+taken after terminal arrival. Inside the closed workspace, `mdp.quantize(x)` returns
+the nearest grid center, with the tie convention above:
 
 ```text
-Phi(x) = (floor(x / cell_widths) + 0.5) * cell_widths
+Phi(x) = argmin_{s in S} ||x - s||_2, x in X
+Phi_plus(x) = Phi(x) if x in X else exit
 ```
 
-`mdp.discretize(x)` returns the finite grid index inside the workspace and the
-exit outcome outside. Deployment retains continuous x and performs:
+`mdp.discretize(x)` returns the index of Phi_plus(x). It checks the original continuous
+position against the closed workspace, so only points strictly outside X become exits.
+Outside cell centers returned by `mdp.quantize(x)` are trajectory diagnostics;
+they are not coordinates of the symbolic exit state. Deployment retains continuous x
+and performs:
 
 ```text
 s = discretize(x)
@@ -164,10 +171,10 @@ no subsequent transitions from terminal states and no padding to the step limit.
 R, C, and the policy stay fixed within each episode. Training uses a separate
 noise-free episodic clone. The physical noise law is not supplied to the learner.
 
-The finite exit outcome is an implementation convention for terminating outside
-landings: extended-grid Phi retains their distinct coordinates for observations,
-while outside cells share a zero planning value. The agent never takes an action
-from the exit outcome during deployment.
+The exit outcome implements the symbolic `s_out` in Section III. Outside landings
+retain their original continuous coordinates and share this zero-valued planning state.
+Episode resets reject goal, obstacle, and exit states, whether supplied as a state index
+or a continuous position. Every episode begins at a nonterminal state.
 A custom `noise_sampler(nominal_position, rng)` can return a bounded 2-D disturbance;
 the comparison plotter's analytic mismatch reference assumes the default disk law.
 
@@ -178,14 +185,24 @@ earn reward without actual goal arrival. Record actual success, collision, and
 workspace exit separately. When changing rewards, keep movement reward below
 `(1-gamma)*goal_reward` for the nominal episodic goal-reaching task.
 
-The localized uncertainty neighborhood contains every cell intersecting the
-continuous deviation ball, as in Equations (3)-(4), including obstacle and goal cells.
-It also includes the zero-valued failure outcome whenever that ball contains a
-point in an outside grid cell. This allows robust Q-learning to account for exit risk
-although nominal training itself never leaves the grid. With half-open cells, touching
-an upper workspace boundary can reach an outside cell; touching a lower boundary cannot.
-It does not select only cell centers inside the ball. C uses physical distance;
-rectangular grids account for both cell widths.
+Goal, obstacle, and exit states have Q=V=0. The TD update uses these zero values for
+the nominal successor and for terminal candidates in the worst-case minimum. The final
+training transition receives its immediate reward before the episode ends. A step-limit
+truncation at a nonterminal state preserves its continuation value in the TD update.
+
+The localized uncertainty neighborhood follows Equations (4)-(5). It contains every
+grid state whose closed cell has distance at most C from the nominal successor, including
+obstacle and goal cells. For the rectangular workspace, the distances are:
+
+```text
+distance_to_cell = ||max(abs(f(s,a) - cell_center) - cell_widths/2, 0)||_2
+distance_to_exit = min(f_x, f_y, x_max - f_x, y_max - f_y)
+```
+
+The exit state is included when `distance_to_exit <= C`, including equality on every
+boundary. This is the infimum distance to `R^2 \ X`; equality includes the exit state
+even though a disturbance ball tangent to the closed workspace has no outside point.
+C uses physical distance, and rectangular grids account for both cell widths.
 
 ## Implementation and update order
 
@@ -248,8 +265,8 @@ The disturbance injection probability 0.3 is not the discrete mismatch probabili
 Under the default unprojected noise law, the mismatch probability for every grid
 state-action pair is approximately 0.2336854404, including goal, obstacle, edge, and
 corner nominal successors. Remaining in the nominal unit cell means that Delta lies
-in the same centered unit square at every grid location. Leaving X counts as a
-mismatch on the extended grid. Thus the reference is
+in the same centered unit square at every grid location. Leaving X maps to the exit
+state and counts as a mismatch. Thus the reference is
 `R_star = 0.3 * (1 - 1/(pi*1.2**2))`.
 The plotter computes the disk/square intersection for this offline reference only.
 
@@ -260,7 +277,7 @@ tau_k = sum of actual episode lengths through episode k
 R_hat_next = sum of observed mismatch indicators / tau_k
 ```
 
-Under the default independent sampler and extended uniform Phi, the mismatch
+Under the default independent sampler and augmented discretization Phi_plus, the mismatch
 mean is the same R-star at every counted step, conditional on previous observations
 and the selected action. This satisfies Assumptions 3 and 5 and the martingale
 condition used by Lemma 5. Ending an episode on a noisy terminal landing does not
@@ -291,9 +308,10 @@ miss_k = 1{score_k > predicted_C_k}
 delta_next = delta_k + eta*(target_failure - miss_k)
 ```
 
-The adaptive failure parameter is not clipped. Nonpositive ranks produce an
-empty prediction with raw C=-infinity; planning uses C=0. Ranks above N produce
-C=+infinity. The plot marks both tails and separately shows planning-radius
+The adaptive failure parameter is not clipped. The following tail-rank and planning
+fallback conventions are implementation choices not specified in Algorithm 2 of the draft.
+Nonpositive ranks produce an empty prediction with raw C=-infinity; planning uses C=0.
+Ranks above N produce C=+infinity. The plot marks both tails and separately shows planning-radius
 coverage when it differs from raw conformal coverage. Infinite radii are retained
 in saved data. A calibrated radius need not equal the physical support radius 1.2.
 

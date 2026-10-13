@@ -136,16 +136,19 @@ class Robot2DMotionMDP(gym.Env):
         return self.state_coordinates[state].copy()
 
     def quantize(self, position):
-        """Phi on the uniform grid extended to R^2, using half-open cells."""
+        """Return Phi inside closed X, retaining outside cell centers for diagnostics."""
         position = np.asarray(position, dtype=float)
         if position.shape != (2,) or not np.all(np.isfinite(position)):
             raise ValueError("A continuous position must be a finite 2-D vector.")
-        return (np.floor(position / self.cell_widths) + 0.5) * self.cell_widths
+        centers = (np.floor(position / self.cell_widths) + 0.5) * self.cell_widths
+        upper_centers = self.bounds - self.cell_widths / 2
+        return np.where(position <= self.bounds, np.minimum(centers, upper_centers), centers)
 
     def discretize(self, position):
-        """Index Phi(x) for planning; aggregate outside cells into the exit outcome."""
+        """Return the index of Phi+(x), with exit only outside the closed workspace."""
+        position = np.asarray(position, dtype=float)
         center = self.quantize(position)
-        if np.any(center < 0) or np.any(center > self.bounds):
+        if np.any(position < 0) or np.any(position > self.bounds):
             return self.failure_state
         indices = np.rint(center / self.cell_widths - 0.5).astype(int)
         return int(indices[0] + self.nx * indices[1])
@@ -197,7 +200,7 @@ class Robot2DMotionMDP(gym.Env):
         return float(self.rewards[self._validate_state(state), self._validate_action(action)])
 
     def localized_uncertainty_states(self, nominal_next_state, C):
-        """Return cells intersecting the deviation ball, including reachable exit outcomes."""
+        """Return states whose cell or exit region has distance at most C, as in (5)."""
         if np.isnan(C) or C < 0:
             raise ValueError("Deviation radius must be nonnegative, or positive infinity.")
         nominal_next_state = self._validate_state(nominal_next_state)
@@ -214,9 +217,8 @@ class Robot2DMotionMDP(gym.Env):
             offsets = np.abs(self.state_coordinates[:self.n_grid_states] - center)
             distances = np.linalg.norm(np.maximum(offsets - self.cell_widths / 2, 0), axis=1)
             states = np.flatnonzero(distances <= C + 1e-12)
-            crosses_lower = C > np.min(center) + 1e-12
-            reaches_upper = C >= np.min(self.bounds - center) - 1e-12
-            if crosses_lower or reaches_upper:
+            exit_distance = min(np.min(center), np.min(self.bounds - center))
+            if exit_distance <= C + 1e-12:
                 states = np.append(states, self.failure_state)
         cache[key] = states
         return states
@@ -227,13 +229,14 @@ class Robot2DMotionMDP(gym.Env):
         if "state" in options and "position" in options:
             raise ValueError("Specify either state or position, not both.")
         if "position" in options:
-            self.s = self.discretize(options["position"])
-            if self.s == self.failure_state:
-                raise ValueError("An episode must start inside the workspace.")
-            self.position = np.asarray(options["position"], dtype=float).copy()
+            position = np.asarray(options["position"], dtype=float)
+            state = self.discretize(position)
         else:
-            self.s = self._validate_state(options.get("state", self.start_state))
-            self.position = self.coordinates(self.s)
+            state = self._validate_state(options.get("state", self.start_state))
+        if self.terminal_mask[state]:
+            raise ValueError("An episode must start at a nonterminal state inside the workspace.")
+        self.s = state
+        self.position = position.copy() if "position" in options else self.coordinates(state)
         self.elapsed_steps = 0
         self._episode_finished = False
         return self.s, {"position": self.position.copy()}

@@ -55,10 +55,29 @@ class RobotMotionModelTests(unittest.TestCase):
         for state in range(64):
             self.assertEqual(mdp.discretize(mdp.coordinates(state)), state)
         self.assertEqual(mdp.discretize((15.99, 7.99)), 63)
-        self.assertEqual(mdp.discretize((16, 8)), mdp.failure_state)
+        self.assertEqual(mdp.discretize((16, 8)), 63)
+        self.assertEqual(mdp.discretize((16, 0)), 7)
+        self.assertEqual(mdp.discretize((0, 8)), 56)
+        self.assertEqual(mdp.discretize((0, 0)), 0)
+        self.assertEqual(mdp.discretize((2, 1)), 9)
+        self.assertEqual(mdp.discretize((np.nextafter(16.0, np.inf), 8)), mdp.failure_state)
+        self.assertEqual(mdp.discretize((16, np.nextafter(8.0, np.inf))), mdp.failure_state)
         self.assertEqual(mdp.discretize((-0.01, 0)), mdp.failure_state)
         np.testing.assert_allclose(mdp.quantize((-0.01, 0)), (-1, 0.5))
-        np.testing.assert_allclose(mdp.quantize((16, 8)), (17, 8.5))
+        np.testing.assert_allclose(mdp.quantize((16, 8)), (15, 7.5))
+
+    def test_reset_rejects_terminal_states_and_positions(self):
+        mdp = Robot2DMotionMDP()
+        obstacle = mdp.cell_to_state((2, 1))
+        for state in (mdp.goal_state, obstacle, mdp.failure_state):
+            with self.subTest(state=state), self.assertRaisesRegex(ValueError, "nonterminal"):
+                mdp.reset(options={"state": state})
+        for position in (mdp.coordinates(mdp.goal_state), mdp.coordinates(obstacle), (8.1, 0)):
+            with self.subTest(position=position), self.assertRaisesRegex(ValueError, "nonterminal"):
+                mdp.reset(options={"position": position})
+        state, info = mdp.reset(options={"position": (8, 0.5)})
+        self.assertEqual(state, mdp.cell_to_state((7, 0)))
+        np.testing.assert_array_equal(info["position"], (8, 0.5))
 
     def test_direction_commands_snap_to_centers(self):
         mdp = Robot2DMotionMDP()
@@ -130,7 +149,8 @@ class RobotMotionModelTests(unittest.TestCase):
     def test_robust_planning_accounts_for_workspace_exit(self):
         mdp = Robot2DMotionMDP(obstacles=[])
         edge = mdp.cell_to_state((0, 2))
-        self.assertNotIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.5))
+        self.assertNotIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.5 - 1e-8))
+        self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.5))
         self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.6))
         upper_edge = mdp.cell_to_state((7, 2))
         self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(upper_edge, 0.5))
@@ -138,7 +158,18 @@ class RobotMotionModelTests(unittest.TestCase):
         values = np.full(mdp.n_state, 0.8)
         values[mdp.terminal_mask] = 0
         self.assertAlmostEqual(agent.robust_td_target(0.1, edge, values), 0.64)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, edge, values, C=0.5), 0.82)
+        self.assertAlmostEqual(agent.robust_td_target(0.1, edge, values, C=0.5), 0.64)
+        self.assertAlmostEqual(agent.robust_td_target(0.1, edge, values, C=0.5 - 1e-8), 0.82)
+
+    def test_exit_distance_threshold_is_symmetric_on_rectangular_grids(self):
+        mdp = Robot2DMotionMDP(x_max=16, y_max=8, obstacles=[])
+        cases = (((0, 3), 1.0), ((7, 3), 1.0), ((3, 0), 0.5), ((3, 7), 0.5), ((3, 3), 3.5))
+        for cell, distance in cases:
+            state = mdp.cell_to_state(cell)
+            for radius in (distance - 1e-8, distance, distance + 1e-8):
+                with self.subTest(cell=cell, radius=radius):
+                    states = mdp.localized_uncertainty_states(state, radius)
+                    self.assertEqual(mdp.failure_state in states, radius >= distance)
 
     def test_goal_ends_the_episode_before_followup_transitions(self):
         mdp = Robot2DMotionMDP(
