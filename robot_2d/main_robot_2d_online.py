@@ -29,7 +29,7 @@ def main(
         obstacles=[(5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
         start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
         noise_probability=noise_probability, noise_radius=noise_radius,
-        max_episode_steps=horizon, seed=seed,
+        max_episode_steps=horizon,
     )
     controller = ConformallyRobustController(
         mdp, gamma=gamma, horizon=horizon, training_horizon=horizon,

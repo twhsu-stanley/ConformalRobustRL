@@ -117,6 +117,26 @@ methods. No disturbance tapes are used. The stored
 run seed is `seed + 100000 * method_index` in the requested method order.
 All methods deploy under the same specified physical noise law.
 
+`pilot_episodes` supplies the initial calibration dataset S_cal required by Algorithm 2.
+When `calibration_scores` is absent, the robot runs this many random-policy episodes
+under the deployment noise law and records each episode's maximum disturbance norm.
+Only these scores initialize ACP; pilot transitions never enter the online R estimate
+or the policy performance comparison. Supplying `calibration_scores` skips pilots,
+and `pilot_episodes=0` is allowed when those scores are supplied.
+
+Seeds control reproducibility of simulated randomness and are optional: `seed=None`
+uses fresh randomness. The fixed-R/C runner seeds each trial's Q-learning agent;
+its deterministic nominal MDP needs no seed. The online controller derives seeds for
+the deployment MDP and each new training agent from the run's generator. Each generator
+is initialized once; nominal training resets and deployment episodes do not reseed it.
+Pilot actions use the controller's generator, exploration uses the agent's generator,
+and disturbances use the MDP's generator. Plotting uses no randomness.
+
+The MDP retains Gymnasium's optional `reset(seed=...)` argument. An explicit seed
+restarts its disturbance generator for repeatable sampling; `reset()` preserves
+the generator and continues its random stream. Resetting the robot's position itself
+is deterministic. A run seed is stored once in the online results for reproducibility.
+
 ## Robot model and continuous deployment
 
 The workspace is the closed rectangle `[0, 8] x [0, 8]`, divided into 8-by-8 unit cells.
@@ -437,8 +457,8 @@ Each call saves `robot_2d_R{R}_C{C}.pkl` under `robot_2d/saved_results/fixedRC/`
 one initial-state value curve per trial. Each starts at zero and records
 `max_a Q(start,a)` after every training transition. Its index is cumulative
 training steps; the agent attribute `evaluation_return` is this learned value,
-not a sampled deployment return. General learning-curve and return utilities are
-in `utils_tabular.py`.
+not a sampled deployment return. `utils_tabular.py` computes the mean and standard
+deviation of saved learning curves for the fixed-R/C comparison plotter.
 
 The companion `robot_2d_R{R}_C{C}_agents.pkl` contains the MDP and trained agents.
 Older curve files need retraining to produce this companion file. Use

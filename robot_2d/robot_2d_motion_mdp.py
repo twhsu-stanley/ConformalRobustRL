@@ -62,7 +62,6 @@ class Robot2DMotionMDP(gym.Env):
         self.noise_radius = float(noise_radius)
         self.noise_sampler = noise_sampler
         self.is_nominal = noise_sampler is None and self.noise_probability == 0.0
-        self.initial_seed = seed
 
         if obstacles is None:
             obstacles = self.DEFAULT_OBSTACLES if self.grid_shape == (8, 8) else ()
@@ -224,6 +223,7 @@ class Robot2DMotionMDP(gym.Env):
         return states
 
     def reset(self, *, seed=None, options=None):
+        """Reset to a nonterminal start; an explicit seed restarts the disturbance RNG."""
         super().reset(seed=seed)
         options = options or {}
         if "state" in options and "position" in options:
@@ -244,7 +244,7 @@ class Robot2DMotionMDP(gym.Env):
     def _sample_deviation(self, nominal_position):
         if self.noise_sampler is not None:
             deviation = np.asarray(self.noise_sampler(nominal_position.copy(), self.np_random))
-        elif self.np_random.random() < self.noise_probability:
+        elif self.noise_probability > 0 and self.np_random.random() < self.noise_probability:
             angle = self.np_random.uniform(0, 2 * np.pi)
             radius = self.noise_radius * np.sqrt(self.np_random.random())
             deviation = radius * np.array((np.cos(angle), np.sin(angle)))
@@ -286,10 +286,10 @@ class Robot2DMotionMDP(gym.Env):
         }
         return self.s, self.reward(state, action), terminated, truncated, info
 
-    def deploy_policy(self, policy, gamma, seed=None, start_position=None):
+    def deploy_policy(self, policy, gamma, start_position=None):
         """Record one episode through its terminal transition, without updating R/ACP."""
         options = None if start_position is None else {"position": start_position}
-        _, info = self.reset(seed=seed, options=options)
+        _, info = self.reset(options=options)
         positions, states = [info["position"].copy()], [self.s]
         actions, rewards, deviations = [], [], []
         mismatches, nominal_positions, deviation_vectors = [], [], []

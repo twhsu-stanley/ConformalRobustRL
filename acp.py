@@ -32,7 +32,6 @@ class ACP:
         self.initial_delta = self.delta
         self.eta = float(eta)
         self.n_updates = 0
-        self.n_miscovered = 0
 
     @staticmethod
     def _validate_score(score):
@@ -64,7 +63,6 @@ class ACP:
         self.delta += self.eta * (self.target_failure - miscovered)
         self.scores.append(score)
         self.n_updates += 1
-        self.n_miscovered += miscovered
         return {
             "miscoverage": miscovered, "delta_before": previous_delta, "delta_after": self.delta,
         }

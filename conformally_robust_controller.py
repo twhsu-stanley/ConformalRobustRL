@@ -44,15 +44,13 @@ class ConformallyRobustController:
         self.horizon = int(horizon)
         self.training_episodes = int(training_episodes)
         self.pilot_episodes = int(pilot_episodes)
-        self.seed = seed
         self.method = method
         self.fixed_R = None if R is None else float(R)
         self.fixed_C = None if C is None else float(C)
         self.rng = np.random.default_rng(seed)
         self.training_env = mdp.clone(nominal=True, max_episode_steps=training_horizon)
-        self.deployment_env = mdp.clone(max_episode_steps=horizon)
+        self.deployment_env = mdp.clone(max_episode_steps=horizon, seed=self._next_seed())
         self.R_estimate = float(initial_R)
-        self.initial_R = float(initial_R)
         self.transition_count = 0
         self.mismatch_count = 0
         self.history = []
@@ -85,19 +83,16 @@ class ConformallyRobustController:
 
     def initialize_calibration(self):
         if self.calibrator is not None:
-            return list(self.calibrator.scores)
+            return
 
         def random_policy(state):
             return int(self.rng.integers(self.deployment_env.action_space.n))
 
         for _ in range(self.pilot_episodes):
-            record = self.deployment_env.deploy_policy(
-                random_policy, self.gamma, seed=self._next_seed(),
-            )
+            record = self.deployment_env.deploy_policy(random_policy, self.gamma)
             self.pilot_scores.append(record["score"])
         self.calibrator = ACP(self.pilot_scores, **self.calibration_options)
         self.initial_calibration_scores = list(self.calibrator.scores)
-        return list(self.calibrator.scores)
 
     def run_episode(self):
         """Train and deploy once, then update uncertainty from this episode only."""
@@ -118,9 +113,7 @@ class ConformallyRobustController:
             self.Q, self.policy = self.agent.robust_q_learning(
                 self.training_episodes, exploring_starts=True, record_every=100,
             )
-        record = self.deployment_env.deploy_policy(
-            self.policy, self.gamma, seed=self._next_seed(),
-        )
+        record = self.deployment_env.deploy_policy(self.policy, self.gamma)
         self.transition_count += len(record["actions"])
         self.mismatch_count += record["episode_mismatches"]
         self.R_estimate = self.mismatch_count / self.transition_count
@@ -152,7 +145,7 @@ class ConformallyRobustController:
             records.append(record)
             if verbose:
                 print(
-                    f"{self.method}, seed {self.seed}, episode {record['episode']}: "
+                    f"{self.method}, episode {record['episode']}: "
                     f"R={record['R_used']:.3f}, C={record['planning_radius']:.3f}, "
                     f"steps={record['episode_length']}, goal={record['goal_reached']}",
                 )

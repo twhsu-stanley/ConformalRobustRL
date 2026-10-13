@@ -28,7 +28,7 @@ def main(
         obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
         start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
         noise_probability=0.0, noise_radius=0.0, noise_sampler=None,
-        max_episode_steps=horizon, seed=seed,
+        max_episode_steps=horizon,
     )
     evaluation_return = []
     agents = []
@@ -36,10 +36,9 @@ def main(
         agent = Tabular_Agent(
             mdp, gamma=gamma, lr_init=0.5, step_start_decay_lr=100000,
             epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
-            R=R, C=C, seed=seed + trial,
+            R=R, C=C, seed=None if seed is None else seed + trial,
         )
         agent.robust_q_learning(training_episodes, record_every=1)
-        # Match the FrozenLake learning curves: V(start), recorded at every transition.
         evaluation_return.append(agent.evaluation_return.copy())
         agents.append(agent)
         print(
@@ -71,7 +70,5 @@ if __name__ == "__main__":
 
     # Fix R = 0.2, compare different C values
     main(R=0.2, C=0.0)
-    
-    main(R=0.2, C=1.0)
-    
+    # R=0.2, C=1.0 was already trained above.
     main(R=0.2, C=1.5)

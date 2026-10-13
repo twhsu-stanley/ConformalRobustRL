@@ -1,11 +1,6 @@
 import numpy as np
 import gymnasium as gym
 
-def is_first_visit(state_hist, action_hist, t):
-    for i in range(t):
-        if state_hist[i] == state_hist[t] and action_hist[i] == action_hist[t]:
-            return False
-    return True
 
 class Tabular_Agent:
     """Learn Q-values using the supplied MDP's reward, terminal rules, and uncertainty set."""
@@ -40,7 +35,6 @@ class Tabular_Agent:
             raise ValueError("Invalid epsilon-greedy schedule.")
         if step_start_decay_lr < 0:
             raise ValueError("step_start_decay_lr must be nonnegative.")
-        self.seed = seed
         self.rng = np.random.default_rng(seed)
         self.initial_state = int(getattr(env.unwrapped, "start_state", 0))
         self.training_diagnostics = {}
@@ -49,7 +43,6 @@ class Tabular_Agent:
 
         # Learning rate parameters
         self.lr_init = lr_init
-        self.lr = lr_init
         self.step_start_decay_lr = step_start_decay_lr
 
         # Epsilon-greedy policy parameters
@@ -58,13 +51,10 @@ class Tabular_Agent:
         self.epsilon_lb = epsilon_lb
         self.epsilon_decay_rate = epsilon_decay_rate
 
-        self.evaluation_return = []
-        self.evaluation_return.append(np.max(self.Q[self.initial_state, :]))
+        self.evaluation_return = [0.0]
 
-        ####################################################
-        # Below are parameters for robust tabular RL
-        self.R = R # Contamination level for the R-C uncertainty set
-        self.C = C # Deviation radius for the R-C uncertainty set
+        self.R = R
+        self.C = C
         self._validate_uncertainty(R, C)
 
     @staticmethod
@@ -79,10 +69,6 @@ class Tabular_Agent:
             return int(self.rng.integers(self.n_action))
         best_actions = np.flatnonzero(self.Q[state] == np.max(self.Q[state]))
         return int(self.rng.choice(best_actions))
-
-    def Q_learning(self, n_episodes, **kwargs):
-        """Ordinary Q-learning is the R=0 special case of the robust update."""
-        return self.robust_q_learning(n_episodes, R=0.0, **kwargs)
 
     def robust_td_target(self, reward, nominal_next_state, values, R=None, C=None):
         R = self.R if R is None else R
@@ -138,11 +124,8 @@ class Tabular_Agent:
         if exploring_starts and not hasattr(base, "trainable_states"):
             raise ValueError("This environment does not support exploring starts.")
         self.Q.fill(0.0)
-        self.lr = self.lr_init
         self.epsilon = self.epsilon_init
-        self.rng = np.random.default_rng(self.seed)
         self.evaluation_return = [0.0]
-        self.evaluation_steps = [0]
         visits = np.zeros_like(self.Q, dtype=int)
         decay_visits = np.zeros_like(visits)
         values = np.zeros(self.n_state)
@@ -163,8 +146,7 @@ class Tabular_Agent:
                     self.rng.shuffle(start_pairs)
                 start_state, first_action = start_pairs[episode % len(start_pairs)]
                 options = {"state": int(start_state)}
-            reset_seed = int(self.rng.integers(0, 2**32 - 1))
-            state, _ = self.env.reset(seed=reset_seed, options=options)
+            state, _ = self.env.reset(options=options)
             while True:
                 action = self.epsilon_greedy_policy(state) if first_action is None else first_action
                 first_action = None
@@ -172,24 +154,22 @@ class Tabular_Agent:
                 visits[state, action] += 1
                 if cumulative_step >= self.step_start_decay_lr:
                     decay_visits[state, action] += 1
-                    self.lr = self.lr_init / decay_visits[state, action]
+                    learning_rate = self.lr_init / decay_visits[state, action]
                 else:
-                    self.lr = self.lr_init
+                    learning_rate = self.lr_init
                 target = self.robust_td_target(reward, successor, values)
-                self.Q[state, action] += self.lr * (target - self.Q[state, action])
+                self.Q[state, action] += learning_rate * (target - self.Q[state, action])
                 values[state] = np.max(self.Q[state])
                 values[base.terminal_mask] = 0.0
                 cumulative_step += 1
                 if cumulative_step % record_every == 0:
                     self.evaluation_return.append(float(values[self.initial_state]))
-                    self.evaluation_steps.append(cumulative_step)
                 state = successor
                 if terminated or truncated:
                     break
             self.epsilon = max(self.epsilon_lb, self.epsilon * self.epsilon_decay_rate)
-        if self.evaluation_steps[-1] != cumulative_step:
+        if cumulative_step % record_every != 0:
             self.evaluation_return.append(float(values[self.initial_state]))
-            self.evaluation_steps.append(cumulative_step)
         self.visit_counts = visits
         learnable_visits = visits[~base.terminal_mask]
         self.training_diagnostics = {

@@ -145,11 +145,21 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(record["planned_miscoverage"], 0)
 
     def test_seeded_controllers_repeat_the_same_run(self):
-        first, second = self.controller(), self.controller()
-        left, right = first.run_episode(), second.run_episode()
-        np.testing.assert_array_equal(left["states"], right["states"])
-        np.testing.assert_allclose(left["positions"], right["positions"])
+        mdp = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0,
+            noise_probability=1, noise_radius=0.3,
+        )
+        options = dict(horizon=6, training_episodes=100, calibration_scores=[0.1] * 10, seed=5)
+        first = ConformallyRobustController(mdp, **options)
+        second = ConformallyRobustController(mdp, **options)
+        for left, right in zip(first.run(3), second.run(3)):
+            np.testing.assert_array_equal(left["states"], right["states"])
+            np.testing.assert_allclose(left["positions"], right["positions"])
+            np.testing.assert_allclose(left["deviation_vectors"], right["deviation_vectors"])
         np.testing.assert_allclose(first.Q, second.Q)
+        self.assertFalse(np.array_equal(
+            first.history[0]["deviation_vectors"], first.history[1]["deviation_vectors"],
+        ))
 
 if __name__ == "__main__":
     unittest.main()
