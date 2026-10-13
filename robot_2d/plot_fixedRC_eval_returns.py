@@ -23,7 +23,7 @@ def main(*, data_dir=None, show=True):
             "robot_2d_fixed_C1.0_compare_R.png",
         ),
         (
-            "Fixed R = 0.2", ((0.2, 0.0), (0.2, 1.0), (0.2, 1.5)),
+            "Fixed R = 0.2", ((0.2, 0.0), (0.2, 1.0), (0.2, 2.0)),
             "robot_2d_fixed_R0.2_compare_C.png",
         ),
     )

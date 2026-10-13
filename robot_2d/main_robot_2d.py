@@ -24,9 +24,9 @@ def main(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     mdp = Robot2DMotionMDP(
-        x_max=8.0, y_max=8.0, grid_shape=(8, 8),
-        obstacles=[(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
-        start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
+        x_max=10.0, y_max=10.0, grid_shape=(10, 10),
+        obstacles=[(5, 1), (1, 3), (5, 6)],
+        start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.01, goal_reward=1.0,
         noise_probability=0.0, noise_radius=0.0, noise_sampler=None,
         max_episode_steps=horizon,
     )
@@ -71,4 +71,4 @@ if __name__ == "__main__":
     # Fix R = 0.2, compare different C values
     main(R=0.2, C=0.0)
     # R=0.2, C=1.0 was already trained above.
-    main(R=0.2, C=1.5)
+    main(R=0.2, C=2.0)
