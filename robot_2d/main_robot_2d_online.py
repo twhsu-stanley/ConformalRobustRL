@@ -105,12 +105,12 @@ if __name__ == "__main__":
         start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.001, goal_reward=1.0,
     )
 
-    seeds = (67,)
+    seeds = (23,)
     methods = ("proposed", "nominal")#, "R_contamination_0.1", "R_contamination_0.3")
     n_deployment_episodes = 40
     training_episodes = 5000
     pilot_episodes = 200
-    R_star = 0.2
+    R_star = 0.3
     shift_period = 100
     for trial, seed in enumerate(seeds, 1):
         mdp.set_obstacles([])

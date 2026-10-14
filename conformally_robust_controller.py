@@ -77,10 +77,10 @@ class ConformallyRobustController:
         }
         # Validate calibration settings before any potentially expensive pilot run.
         validated = ACP([0.0], **self.acp_options)
-        self.calibrator = None
+        self.acp = None
         if calibration_scores is not None:
-            self.calibrator = ACP(calibration_scores, **self.acp_options)
-            self.initial_calibration_scores = list(self.calibrator.scores)
+            self.acp = ACP(calibration_scores, **self.acp_options)
+            self.initial_calibration_scores = list(self.acp.scores)
         elif self.pilot_episodes == 0:
             raise ValueError("Provide calibration_scores or request at least one pilot episode.")
         self.delta = validated.delta
@@ -89,7 +89,7 @@ class ConformallyRobustController:
         return int(self.rng.integers(0, 2**32 - 1))
 
     def initialize_calibration(self):
-        if self.calibrator is not None:
+        if self.acp is not None:
             return
 
         def random_policy(state):
@@ -100,8 +100,8 @@ class ConformallyRobustController:
                 self.episode_setup(self, episode)
             record = self.deployment_env.deploy_policy(random_policy, self.gamma)
             self.pilot_scores.append(record["score"])
-        self.calibrator = ACP(self.pilot_scores, **self.acp_options)
-        self.initial_calibration_scores = list(self.calibrator.scores)
+        self.acp = ACP(self.pilot_scores, **self.acp_options)
+        self.initial_calibration_scores = list(self.acp.scores)
 
     def run_episode(self):
         """Train and deploy once, then update uncertainty from this episode only."""
@@ -110,7 +110,7 @@ class ConformallyRobustController:
         if self.episode_setup is not None:
             settings = self.episode_setup(self, len(self.history))
         if self.fixed_C is None:
-            C_hat = self.calibrator.quantile()
+            C_hat = self.acp.quantile()
         else:
             Tabular_Agent._validate_uncertainty(0.0, self.fixed_C)
             C_hat = max(0.0, float(self.fixed_C))
@@ -136,13 +136,13 @@ class ConformallyRobustController:
         self.mismatch_count += record["episode_mismatches"]
         self.R_hat = self.mismatch_count / self.transition_count
         if self.fixed_C is None:
-            update = self.calibrator.update(record["score"], predicted_radius=C_hat)
+            update = self.acp.update(record["score"], predicted_radius=C_hat)
         else:
             update = {
                 "miscoverage": int(record["score"] > C_hat),
-                "delta_k": self.calibrator.delta_k, "delta_next": self.calibrator.delta_k,
+                "delta_k": self.acp.delta_k, "delta_next": self.acp.delta_k,
             }
-            self.calibrator.scores.append(record["score"])
+            self.acp.scores.append(record["score"])
         record.update({
             "episode": len(self.history) + 1, "R_used": R_used,
             "R_hat_next": self.R_hat, "C_hat": float(C_hat),
