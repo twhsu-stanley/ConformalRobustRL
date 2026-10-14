@@ -10,13 +10,16 @@ class ConformallyRobustController:
     """Own independent nominal/deployment environments and persistent calibration.
 
     Algorithm 2 starts Algorithm 1 from zero every episode; the nominal baseline
-    reuses its fixed policy. The MDP supplies clone() and deploy_policy(). Only
-    actual deployment transitions enter the mismatch estimate; pilot calibration
+    reuses its policy when the environment stays fixed. The MDP supplies clone()
+    and deploy_policy(). Only actual deployment transitions enter the mismatch
+    estimate; pilot calibration
     does not. Episodes stop at a terminal condition, with horizon
     acting as a step limit. R uses the total observed transition count tau_k.
 
     R/C=None selects online estimation/calibration; numeric values hold them fixed.
     method='nominal' plans with R=C=0; method='global' plans with C=infinity.
+    episode_setup(controller, index) runs before each episode and returns metadata.
+    Indices are zero-based online and negative for the initial pilot episodes.
     """
 
     def __init__(
@@ -25,6 +28,7 @@ class ConformallyRobustController:
         eta=0.01, calibration_scores=None, calibration_window=100, pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, method="proposed", R=None, C=None,
+        episode_setup=None,
     ):
         if method not in ("proposed", "nominal", "global"):
             raise ValueError("method must be 'proposed', 'nominal', or 'global'.")
@@ -47,6 +51,7 @@ class ConformallyRobustController:
         self.method = method
         self.fixed_R = None if R is None else float(R)
         self.fixed_C = None if C is None else float(C)
+        self.episode_setup = episode_setup
         self.rng = np.random.default_rng(seed)
         self.training_env = mdp.clone(nominal=True, max_episode_steps=training_horizon)
         self.deployment_env = mdp.clone(max_episode_steps=horizon, seed=self._next_seed())
@@ -88,7 +93,9 @@ class ConformallyRobustController:
         def random_policy(state):
             return int(self.rng.integers(self.deployment_env.action_space.n))
 
-        for _ in range(self.pilot_episodes):
+        for episode in range(-self.pilot_episodes, 0):
+            if self.episode_setup is not None:
+                self.episode_setup(self, episode)
             record = self.deployment_env.deploy_policy(random_policy, self.gamma)
             self.pilot_scores.append(record["score"])
         self.calibrator = ACP(self.pilot_scores, **self.calibration_options)
@@ -97,6 +104,9 @@ class ConformallyRobustController:
     def run_episode(self):
         """Train and deploy once, then update uncertainty from this episode only."""
         self.initialize_calibration()
+        settings = {}
+        if self.episode_setup is not None:
+            settings = self.episode_setup(self, len(self.history))
         conformal_radius = self.calibrator.quantile() if self.fixed_C is None else self.fixed_C
         planning_radius = self.calibrator.planning_radius(conformal_radius)
         R_used = self.R_estimate if self.fixed_R is None else self.fixed_R
@@ -133,6 +143,7 @@ class ConformallyRobustController:
             "transition_count": self.transition_count, "mismatch_count": self.mismatch_count,
             "training": self.agent.training_diagnostics.copy(), "training_reused": reused,
         })
+        record.update(settings)
         self.history.append(record)
         return record
 

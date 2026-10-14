@@ -26,7 +26,7 @@ python -m robot_2d.plot_online_comparison
 ```
 
 The settings at the bottom of `robot_2d/main_robot_2d_online.py` run three methods
-for seeds `(87,)`, with 30 outer episodes, 4,000 inner training episodes per
+for seeds `(87,)`, with 100 outer episodes, 4,000 inner training episodes per
 training call and 100 pilot episodes.
 All online results and figures go to `robot_2d/saved_results/online/`.
 Each call to `main()` saves one file named
@@ -42,11 +42,13 @@ for a single run. For example:
 ```python
 from robot_2d.main_robot_2d_online import main
 from robot_2d.plot_online_comparison import plot_comparison
+from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 # Run Algorithm 2 alone.
+mdp = Robot2DMotionMDP(x_max=10, y_max=10, grid_shape=(10, 10), obstacles=[])
 controller = main(
-    n_episodes=30, training_episodes=4000, pilot_episodes=100,
-    save_plots=False,
+    mdp=mdp, n_episodes=100, training_episodes=4000, pilot_episodes=100,
+    true_R=0.2, shift_period=100, save_plots=False,
 )
 
 # Replot saved comparisons without training or deployment.
@@ -62,20 +64,21 @@ These continuation calls do not rewrite the files previously saved by `main()`.
 | Method | Planning R | Planning C | Training |
 | --- | --- | --- | --- |
 | `proposed` | Cumulative mismatch estimate | Pre-episode ACP radius | Fresh zero Q-table each episode |
-| `nominal` | 0 | 0 | Train once per seed and reuse the policy |
+| `nominal` | 0 | 0 | Fresh zero Q-table for each new obstacle map |
 | `global` | Its own cumulative mismatch estimate | Positive infinity | Fresh zero Q-table each episode |
 
 The global method implements the globally supported R-contamination comparison
 associated with [Wang and Zou, NeurIPS 2021](https://proceedings.neurips.cc/paper/2021/file/3a4496776767aaa99f9804d0905fe584-Paper.pdf).
-Using `np.inf` includes all 65 next states: 64 grid states and the workspace-failure state.
+Using `np.inf` includes all 101 next states on the configured 10-by-10 grid:
+100 grid states and the workspace-failure state.
 Our comparison supplies this baseline with the same estimation procedure for R;
 that online estimator is part of our experimental protocol.
 
 ```python
-controller = main(method='proposed', R=None, C=None, save_plots=False)
-controller = main(method='nominal', save_plots=False)
-controller = main(method='global', save_plots=False)
-controller = main(method='proposed', R=0.2, C=0.7, save_plots=False)
+controller = main(mdp=mdp, method='proposed', R=None, C=None, save_plots=False)
+controller = main(mdp=mdp, method='nominal', save_plots=False)
+controller = main(mdp=mdp, method='global', save_plots=False)
+controller = main(mdp=mdp, method='proposed', R=0.2, C=0.7, save_plots=False)
 ```
 
 `R=None` uses the cumulative estimate for planning; numeric R holds the planning
@@ -87,6 +90,7 @@ With `C=None`, ACP diagnostics are still collected for the nominal and global me
 
 | Argument to `main()` | Default | Meaning |
 | --- | --- | --- |
+| `mdp` | Required | Robot geometry and rewards; this experiment requires unit cells |
 | `n_episodes` | 30 | Outer deployment episodes |
 | `training_episodes` | 4000 | Inner Algorithm 1 training episodes per call |
 | `horizon` | 100 | Maximum deployment and nominal training episode length |
@@ -98,8 +102,8 @@ With `C=None`, ACP diagnostics are still collected for the nominal and global me
 | `calibration_window` | 100 | Maximum number of stored calibration scores |
 | `pilot_episodes` | 20 | Random-policy pilots when scores are not supplied |
 | `calibration_scores` | `None` | Optional initial episode maximum deviations |
-| `noise_probability` | 0.3 | Simulator disturbance injection probability |
-| `noise_radius` | 1.2 | Simulator disk support radius |
+| `true_R` | 0.2 | Fixed true mismatch probability in the simulator |
+| `shift_period` | 100 | Number of episodes in one support-bound cycle |
 | `seed` | 7 | Random seed for a single run |
 | `trial` | 1 | Trial number used in the saved filename |
 | `save_plots` | `True` | Save the two single-run figures |
@@ -115,7 +119,8 @@ Each method maintains its own subsequent R estimate and calibration history.
 Simulation draws ordinary random disturbances, with separate run seeds for the
 methods. No disturbance tapes are used. The stored
 run seed is `seed + 100000 * method_index` in the requested method order.
-All methods deploy under the same specified physical noise law.
+All methods use the same support schedule and true R-star. Their obstacle maps
+are independent draws from the same placement rule.
 
 `pilot_episodes` supplies the initial calibration dataset S_cal required by Algorithm 2.
 When `calibration_scores` is absent, the robot runs this many random-policy episodes
@@ -129,8 +134,8 @@ uses fresh randomness. The fixed-R/C runner seeds each trial's Q-learning agent;
 its deterministic nominal MDP needs no seed. The online controller derives seeds for
 the deployment MDP and each new training agent from the run's generator. Each generator
 is initialized once; nominal training resets and deployment episodes do not reseed it.
-Pilot actions use the controller's generator, exploration uses the agent's generator,
-and disturbances use the MDP's generator. Plotting uses no randomness.
+Pilot actions and obstacle maps use the controller's generator, exploration uses
+the agent's generator, and disturbances use the MDP's generator. Plotting uses no randomness.
 
 The MDP retains Gymnasium's optional `reset(seed=...)` argument. An explicit seed
 restarts its disturbance generator for repeatable sampling; `reset()` preserves
@@ -139,20 +144,26 @@ is deterministic. A run seed is stored once in the online results for reproducib
 
 ## Robot model and continuous deployment
 
-The workspace is the closed rectangle `[0, 8] x [0, 8]`, divided into 8-by-8 unit cells.
+The main scripts configure the closed workspace `[0, 10] x [0, 10]`, divided into
+10-by-10 unit cells, with start `(0.5, 0.5)` and goal `(9.5, 9.5)`.
 The uncertainty neighborhood uses closed grid cells. Discretization chooses the
 upper-index cell at internal ties and an interior cell at the upper workspace boundary.
-Start and goal positions are `(0.5, 0.5)` and `(7.5, 7.5)`. Default obstacle cells are
-`(2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)`.
-The online comparison omits `(2, 1)`.
+Every online episode, including each pilot, samples exactly ten distinct obstacle cells.
+The Chebyshev distance in cell indices from every obstacle to both start and goal
+must be at least two. Maps are resampled if they disconnect start from goal or repeat
+the previous map. The same map is used for nominal training and physical deployment
+and stays fixed throughout that episode. `set_obstacles()` rebuilds the MDP's reward
+table, terminal mask, trainable states, and nominal transitions together.
+The standalone fixed-R/C runner retains its fixed obstacles `(5, 1), (1, 3), (5, 6)`.
 Cells are indexed by `(ix, iy)` with discrete state `s = ix + nx * iy`.
 Actions `0, 1, 2, 3` command `+x, -x, +y, -y`, respectively.
-The additional state `failure_state=64` represents workspace exit, giving 65 Q-table
+The additional state `failure_state=100` represents workspace exit, giving 101 Q-table
 rows. It aggregates outside cells for finite planning and has no cell center. The
 nominal function f(s,a) is unchanged on the original grid states, including outward
 commands that remain in the current cell. The failure row has zero value and reward.
 Edit the direct `Robot2DMotionMDP` construction in the main scripts to change
-bounds, grid, obstacles, start/goal, or rewards.
+bounds, grid, start/goal, or rewards. Online obstacle placement is handled in
+`robot_2d/online_settings.py`.
 
 Section III defines the nominal dynamics as `F(x,a)=f(Phi(x),a)`:
 the action targets the neighboring cell center even when the current continuous
@@ -183,8 +194,8 @@ x = x_observed
 # End the episode at a goal, obstacle, workspace exit, or the step limit.
 ```
 
-At every recorded transition, Delta is zero with probability 0.7 and otherwise
-uniform in a disk of radius 1.2. The sampled vector is neither projected nor
+The online experiment uses the shifting axis-disturbance law described below.
+The sampled vector is neither projected nor
 resampled, including when it leaves the workspace. The final position, original
 vector, and norm are recorded before checking the terminal condition. There are
 no subsequent transitions from terminal states and no padding to the step limit.
@@ -195,8 +206,9 @@ The exit outcome implements the symbolic `s_out` in Section III. Outside landing
 retain their original continuous coordinates and share this zero-valued planning state.
 Episode resets reject goal, obstacle, and exit states, whether supplied as a state index
 or a continuous position. Every episode begins at a nonterminal state.
-A custom `noise_sampler(nominal_position, rng)` can return a bounded 2-D disturbance;
-the comparison plotter's analytic mismatch reference assumes the default disk law.
+A custom `noise_sampler(nominal_position, rng)` can return a bounded 2-D disturbance.
+Online plots read the saved true R-star. The disk-intersection reference remains
+available for earlier results using the MDP's zero/uniform-disk sampler.
 
 Rewards remain the paper's fixed `r(s,a)` during noisy deployment: a nominal goal
 command receives 1, a valid nominal free move receives 0.01, and obstacle or outward
@@ -229,6 +241,8 @@ C uses physical distance, and rectangular grids account for both cell widths.
 `main_robot_2d_online.py` configures `ConformallyRobustController`, calls its
 `run()`, then saves and plots. The controller's `run_episode()` is the
 single implementation of training and R/ACP updates for all experiment settings.
+An optional episode-setup callback prepares maps and disturbance laws before pilots
+and before each online training/deployment episode. It also runs during continuation.
 `Robot2DMotionMDP.deploy_policy()` is the single continuous rollout routine shared
 by random-policy pilots and online deployment.
 Robot-specific dynamics and plotting remain under `robot_2d/`.
@@ -242,15 +256,16 @@ Training uses rewards returned by `env.step()` and the MDP's terminal mask;
 Bellman diagnostics use `env.reward()`. Environments must supply this interface
 explicitly, including when adapting a bare Gym environment such as FrozenLake.
 
-For each proposed or global episode:
+For each online episode:
 
-1. Predict the conformal radius using scores available before deployment, and
+1. Randomize the obstacle map and set the episode's physical disturbance law.
+2. Predict the conformal radius using scores available before deployment, and
    select the pre-episode R estimate.
-2. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C.
-3. Deploy until a terminal condition or the step limit, recording every landing,
+3. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C.
+4. Deploy until a terminal condition or the step limit, recording every landing,
    reward, mismatch, and disturbance, including the final transition.
-4. Update R as total discrete mismatches divided by total online transitions.
-5. Compute the maximum continuous deviation over the episode, score the
+5. Update R as total discrete mismatches divided by total online transitions.
+6. Compute the maximum continuous deviation over the episode, score the
    pre-episode prediction, and update ACP and its score window.
 
 Pilot transitions never enter the R estimator. All actual online transitions enter R.
@@ -262,7 +277,7 @@ Exploring starts cycle through shuffled nonterminal state-action pairs. The
 controller uses learning rate 0.5 for the first 100,000 training transitions,
 then per-pair harmonic decay. Its epsilon schedule starts at 1.0, decays by 0.995
 per training episode, and has a floor of 0.1. All changing planning problems use
-fresh zero Q-tables. The nominal baseline reuses its fixed policy.
+fresh zero Q-tables. The nominal baseline also retrains when its map changes.
 Finite Q-learning approximates the robust optimum; inspect saved Bellman residuals
 and unvisited pairs when selecting a common training budget across methods.
 
@@ -281,14 +296,10 @@ transition count tau_k, together with the simultaneous bound from Lemma 5:
 `plot_comparison(delta_R=0.05)` sets its confidence parameter. The bound
 applies to each run; it is not a joint confidence statement across seeds.
 
-The disturbance injection probability 0.3 is not the discrete mismatch probability.
-Under the default unprojected noise law, the mismatch probability for every grid
-state-action pair is approximately 0.2336854404, including goal, obstacle, edge, and
-corner nominal successors. Remaining in the nominal unit cell means that Delta lies
-in the same centered unit square at every grid location. Leaving X maps to the exit
-state and counts as a mismatch. Thus the reference is
-`R_star = 0.3 * (1 - 1/(pi*1.2**2))`.
-The plotter computes the disk/square intersection for this offline reference only.
+The new experiment has true R-star exactly equal to `true_R`, default 0.2.
+Every nonzero axis disturbance leaves the nominal unit cell, including for goal,
+obstacle, edge, and corner nominal successors. An outside landing counts as a mismatch.
+This reference is saved for plotting and is not supplied to Q-learning.
 
 After k online episodes, the controller estimate is:
 
@@ -307,11 +318,13 @@ satisfy the paper's assumptions; accepting a callable does not verify them.
 
 ### ACP calibration: `acp_calibration`
 
-The four panels show first-seed continuous episode scores and pre-episode radii,
+The four panels show first-seed continuous episode scores, true support bounds,
+and pre-episode radii,
 cumulative episode coverage, trailing-window coverage, and the mean number of
-states in localized neighborhoods compared with the 65-state global support.
+states in localized neighborhoods compared with the 101-state global support.
 The support-size diagnostic averages over nominal targets of nonterminal
-state-action pairs. `plot_comparison(window=10)` controls the trailing
+state-action pairs using each episode's actual obstacle map.
+`plot_comparison(window=10)` controls the trailing
 coverage window independently of the calibration window used during the run.
 
 Coverage compares ACP with a rolling quantile at the fixed target failure
@@ -333,7 +346,7 @@ fallback conventions are implementation choices not specified in Algorithm 2 of 
 Nonpositive ranks produce an empty prediction with raw C=-infinity; planning uses C=0.
 Ranks above N produce C=+infinity. The plot marks both tails and separately shows planning-radius
 coverage when it differs from raw conformal coverage. Infinite radii are retained
-in saved data. A calibrated radius need not equal the physical support radius 1.2.
+in saved data. A calibrated radius need not equal that episode's true support bound.
 
 For adaptive runs, the exact bookkeeping identity after K episodes is:
 
@@ -371,18 +384,30 @@ Single-run `main(save_plots=True)` saves `online_uncertainty_{test}.png` and
 Assumption 5 allows the unknown distribution D-star-k and its bounded support
 C-star-k to change between episodes, while retaining a common conditional
 mismatch mean R-star. The distribution stays fixed within each episode.
-The default comparison uses one fixed distribution, a special case of this setting.
-Changing observed scores or ACP radii does not itself imply a distribution shift.
+The online experiment implements this shift automatically. With zero-based online
+episode index `k` and period `P=shift_period`, its true support bound is:
 
-For a shifted experiment, change `controller.deployment_env.noise_radius` and
-`noise_probability` between `run_episode()` calls, keeping the same R-star.
-For a disk containing the whole nominal cell, use
-`noise_probability = R_star / (1 - cell_area/(pi*noise_radius**2))`, provided this
-probability is at most one. For example, the default unit-cell law at radius 1.2
-and probability 0.3 has the same R-star as radius 2.4 and probability approximately
-0.247354794. The learner receives neither parameter; its cumulative R estimate and
-ACP history continue across the shift. The analytic R plot assumes this common
-R-star; it does not infer an arbitrary custom sampler's reference.
+```text
+C_star_k = 0.5 + 1.5*sin(pi*((k % P) + 0.5)/P)**2
+```
+
+With `P=100`, it moves smoothly between approximately 0.50037 and 1.99963,
+with consecutive changes below 0.048. The half-episode phase keeps the radius
+strictly above 0.5. At exactly 0.5, the current quantizer cannot provide a positive
+common mismatch probability for every nominal target, including the corner goal.
+
+At each transition, draw Delta=0 with probability `1-true_R`. Otherwise choose one
+of the four signed coordinate directions uniformly and draw its length uniformly
+between `(0.5+C_star_k)/2` and `C_star_k`. This length always exceeds half a unit cell,
+so every nonzero draw is a mismatch. The law ignores the state, action, and obstacle
+map; thus its conditional mismatch mean is exactly `true_R` at every counted step.
+Its support reaches `C_star_k`, and its parameters stay fixed within the episode.
+This satisfies the common-R requirement of Assumptions 3 and 5 without changing
+the uncertainty-set construction in Section IV-A.
+
+Pilots use the same periodic schedule at indices `-pilot_episodes, ..., -1`;
+online episodes start at index zero. Shared calibration scores skip those pilots.
+The cumulative R estimate and ACP history persist across map and distribution changes.
 
 Changing the radius alone generally changes R-star and violates Assumption 5.
 When the true R varies, the cumulative estimator summarizes past transition
@@ -410,8 +435,9 @@ including all matching trials. Edit those patterns in the plotter to select othe
 Each run record contains settings, the configured MDP, initial and pilot scores,
 final R and ACP parameter, full online histories, final Q/policy, state-action
 visit counts.
-Q has shape `(65, 4)` and policy has shape `(65,)` on the
-default grid; the failure row is zero. Each history records pre-episode planning R/C, raw
+Q has shape `(101, 4)` and policy has shape `(101,)` on the
+configured online grid; the failure row is zero. Each history records its ten obstacle
+cells and true support bound, pre-episode planning R/C, raw
 conformal radius, score, miscoverage, ACP parameters before/after, cumulative
 counts, training diagnostics, original deviation vectors, continuous positions,
 extended-grid quantized positions, episode length, and terminal outcome.
@@ -439,6 +465,7 @@ different trial number to retain another run. The script numbers trials from one
 independently of their seeds. The comparison plotter reads the matching files directly.
 Results from previous projected, padded, or resetting deployments require rerunning
 to produce the current terminal episodes, transition counts, and trajectory fields.
+Runs from the former fixed-map experiment must also be regenerated for this comparison.
 
 ## Algorithm 1 alone and its learning curves
 
@@ -488,3 +515,5 @@ learning and reference solutions, cumulative accounting across unequal episode
 lengths, continuous noise without projection, workspace-exit planning, terminal
 transition recording, saved run files and policy plots,
 script imports, and controller continuation with retained experiment settings.
+They also check randomized map protection and reachability, slow support shifts,
+and the common mismatch probability across nominal targets, including boundaries.

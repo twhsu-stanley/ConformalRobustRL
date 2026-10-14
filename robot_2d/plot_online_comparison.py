@@ -68,7 +68,9 @@ def plot_R(runs, delta_R=0.05):
     estimates, probabilities, transition_counts = [], [], []
     for run in runs:
         mdp = run["mdp"]
-        probability = mismatch_probabilities(mdp)[mdp.start_state, 0]
+        probability = run.get("true_R")
+        if probability is None:
+            probability = mismatch_probabilities(mdp)[mdp.start_state, 0]
         probabilities.append(probability)
         estimate = np.asarray([row["R_next"] for row in run["history"]])
         estimates.append(estimate)
@@ -98,7 +100,10 @@ def plot_calibration(runs, window):
     scores = [row["score"] for row in history]
     axes[0, 0].plot(episodes, scores, ".", label="Episode maximum continuous deviation")
     axes[0, 0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label="Predicted C")
-    ceiling = max(1, runs[0]["mdp"].noise_radius) * 1.1
+    support_bounds = [row.get("true_support", runs[0]["mdp"].noise_radius) for row in history]
+    if "true_support" in history[0]:
+        axes[0, 0].plot(episodes, support_bounds, "k:", label="True support bound C*")
+    ceiling = max(1, max(support_bounds), max(scores)) * 1.1
     for tail, level, marker, label in (
         (np.isposinf(radii), ceiling, "^", "Unbounded"),
         (np.isneginf(radii), 0, "x", "Empty; planner uses C=0"),
@@ -116,11 +121,14 @@ def plot_calibration(runs, window):
         frozen_radius = quantile.quantile()
         quantile.delta = run["target_failure"]
         fixed, frozen, support = [], [], []
+        mdp = run["mdp"].clone(nominal=True)
         for row in run["history"]:
             fixed.append(int(row["score"] > quantile.quantile()))
             frozen.append(int(row["score"] > frozen_radius))
             quantile.scores.append(row["score"])
-            mdp, radius = run["mdp"], row["planning_radius"]
+            if "obstacles" in row:
+                mdp.set_obstacles(row["obstacles"])
+            radius = row["planning_radius"]
             counts = [len(mdp.localized_uncertainty_states(s, radius)) for s in range(mdp.n_state)]
             nominal_targets = mdp.nominal_transitions[mdp.trainable_states]
             support.append(np.mean(np.asarray(counts)[nominal_targets]))

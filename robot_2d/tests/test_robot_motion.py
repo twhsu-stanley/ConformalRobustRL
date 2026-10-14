@@ -254,7 +254,7 @@ class SingleRunnerTests(unittest.TestCase):
                             self.assertEqual(len(curve), agent.visit_counts.sum() + 1)
                         with redirect_stdout(io.StringIO()):
                             fig = plot_saved_policy(
-                                R=R, C=C, trial=n_trials - 1, data_dir=saved_dir, show=False,
+                                R=R, C=C, trial=n_trials - 1, data_dir=saved_dir,
                             )
                         plot_name = f"robot_2d_R{R}_C{C}_trial{n_trials}_value_policy.png"
                         self.assertTrue((saved_dir / plot_name).is_file())
@@ -286,13 +286,14 @@ class ResultsDirectoryTests(unittest.TestCase):
                         filename = str(script_directory / f"{name}.py")
                         stack.enter_context(patch(f"robot_2d.{name}.__file__", filename))
                     with redirect_stdout(io.StringIO()):
-                        for R, C in ((0.0, 1.0), (0.1, 1.0), (0.2, 1.0), (0.2, 0.0), (0.2, 1.5)):
+                        for R, C in ((0.0, 1.0), (0.1, 1.0), (0.2, 1.0), (0.2, 0.0), (0.2, 2.0)):
                             single_main(R=R, C=C, training_episodes=10, horizon=5)
                         figures = plot_saved_returns(show=False)
-                        figures.append(plot_saved_policy(show=False))
+                        figures.append(plot_saved_policy())
                         for figure in figures:
                             plt.close(figure)
                         online_main(
+                            mdp=Robot2DMotionMDP(),
                             n_episodes=1, training_episodes=10, horizon=5, pilot_episodes=2,
                         )
                 files = [path for path in root.rglob("*") if path.is_file()]
@@ -338,6 +339,7 @@ class OnlineRunnerTests(unittest.TestCase):
                     output_dir = root / "saved_results/online"
                     with redirect_stdout(io.StringIO()):
                         controller = online_main(
+                            mdp=Robot2DMotionMDP(),
                             training_episodes=10, horizon=5, n_episodes=n_episodes,
                             pilot_episodes=2, save_plots=False, trial=n_episodes,
                         )

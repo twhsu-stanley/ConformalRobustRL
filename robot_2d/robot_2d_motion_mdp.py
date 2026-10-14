@@ -8,7 +8,7 @@ from gymnasium import spaces
 
 
 class Robot2DMotionMDP(gym.Env):
-    """An 8-by-8 robot MDP with separate nominal and uncertain rollout instances.
+    """A grid robot MDP with separate nominal and uncertain rollout instances.
 
     Cells are indexed by (ix, iy), with state = ix + nx * iy. Actions 0, 1, 2, 3
     command +x, -x, +y, -y, respectively. Rewards depend on (state, action), even
@@ -66,9 +66,6 @@ class Robot2DMotionMDP(gym.Env):
         if obstacles is None:
             obstacles = self.DEFAULT_OBSTACLES if self.grid_shape == (8, 8) else ()
         self.obstacle_mask = np.zeros((self.ny, self.nx), dtype=bool)
-        for cell in obstacles:
-            ix, iy = self._validate_cell(cell)
-            self.obstacle_mask[iy, ix] = True
         self.start_cell = self._validate_cell(start_cell)
         goal_cell = (self.nx - 1, self.ny - 1) if goal_cell is None else goal_cell
         self.goal_cell = self._validate_cell(goal_cell)
@@ -76,21 +73,13 @@ class Robot2DMotionMDP(gym.Env):
         self.goal_state = self.cell_to_state(self.goal_cell)
         if self.start_state == self.goal_state:
             raise ValueError("Start and goal must be different cells.")
-        if self.obstacle_mask[self.start_cell[1], self.start_cell[0]]:
-            raise ValueError("Start cannot be an obstacle.")
-        if self.obstacle_mask[self.goal_cell[1], self.goal_cell[0]]:
-            raise ValueError("Goal cannot be an obstacle.")
-        self._validate_path()
         states = np.arange(self.n_grid_states)
         indices = np.column_stack((states % self.nx, states // self.nx))
         self.state_coordinates = np.vstack(((indices + 0.5) * self.cell_widths, [np.nan, np.nan]))
-        self.terminal_mask = np.append(self.obstacle_mask.ravel(), True)
-        self.terminal_mask[self.goal_state] = True
-        self.trainable_states = np.flatnonzero(~self.terminal_mask)
         self.nominal_transitions = np.zeros((self.n_state, 4), dtype=int)
         self.rewards = np.zeros((self.n_state, 4), dtype=float)
         self.boundary_commands = np.zeros((self.n_state, 4), dtype=bool)
-        self._build_nominal_model()
+        self.set_obstacles(obstacles)
         self.reset(seed=seed)
 
     @staticmethod
@@ -168,6 +157,30 @@ class Robot2DMotionMDP(gym.Env):
                     visited.add(neighbor)
                     queue.append(neighbor)
         raise ValueError("The obstacle map has no nominal path from start to goal.")
+
+    def set_obstacles(self, obstacles):
+        """Update the map between episodes, rebuilding its terminal and reward tables."""
+        mask = np.zeros((self.ny, self.nx), dtype=bool)
+        for cell in obstacles:
+            ix, iy = self._validate_cell(cell)
+            mask[iy, ix] = True
+        if mask[self.start_cell[1], self.start_cell[0]]:
+            raise ValueError("Start cannot be an obstacle.")
+        if mask[self.goal_cell[1], self.goal_cell[0]]:
+            raise ValueError("Goal cannot be an obstacle.")
+        previous = self.obstacle_mask
+        self.obstacle_mask = mask
+        try:
+            self._validate_path()
+        except ValueError:
+            self.obstacle_mask = previous
+            raise
+        self.terminal_mask = np.append(mask.ravel(), True)
+        self.terminal_mask[self.goal_state] = True
+        self.trainable_states = np.flatnonzero(~self.terminal_mask)
+        self.rewards.fill(0.0)
+        self.boundary_commands.fill(False)
+        self._build_nominal_model()
 
     def _build_nominal_model(self):
         for state in range(self.n_state):

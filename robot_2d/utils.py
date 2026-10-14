@@ -84,6 +84,10 @@ def plot_conformal_history(history, target_failure):
     ceiling = max(1.0, np.max(scores), np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
     axes[1].plot(episodes, scores, label="Episode maximum deviation")
     axes[1].plot(episodes, finite_radii, label="Conformal radius")
+    if "true_support" in history[0]:
+        support_bounds = [item["true_support"] for item in history]
+        axes[1].plot(episodes, support_bounds, "k:", label="True C*")
+        ceiling = max(ceiling, max(support_bounds) * 1.1)
     if np.any(np.isposinf(radii)):
         axes[1].scatter(
             episodes[np.isposinf(radii)], np.full(np.isposinf(radii).sum(), ceiling),

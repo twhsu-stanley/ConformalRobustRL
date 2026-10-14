@@ -1,6 +1,7 @@
 """Check continuous deployment, uncertainty updates, and online controller settings."""
 
 from pathlib import Path
+import pickle
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -137,6 +138,7 @@ class OnlineSettingsTests(unittest.TestCase):
             for method in ("proposed", "nominal", "global"):
                 with self.subTest(method=method):
                     controller = main(
+                        mdp=Robot2DMotionMDP(),
                         method=method, n_episodes=2, training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20,
                         save_plots=False, verbose=False,
@@ -150,7 +152,7 @@ class OnlineSettingsTests(unittest.TestCase):
                                         for r in controller.history))
                     if method == "nominal":
                         self.assertEqual(last["R_used"], 0)
-                        self.assertTrue(last["training_reused"])
+                        self.assertFalse(last["training_reused"])
                     else:
                         self.assertAlmostEqual(last["R_used"], first["R_next"])
                         self.assertFalse(last["training_reused"])
@@ -164,6 +166,7 @@ class OnlineSettingsTests(unittest.TestCase):
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
             fixed = main(
+                mdp=Robot2DMotionMDP(),
                 n_episodes=2, training_episodes=10, horizon=5, R=0.2, C=0.7,
                 calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
             )
@@ -171,6 +174,7 @@ class OnlineSettingsTests(unittest.TestCase):
             self.assertTrue(all(row["planning_radius"] == 0.7 for row in fixed.history))
             self.assertEqual(fixed.calibrator.delta, 0.1)
             adaptive = main(
+                mdp=Robot2DMotionMDP(),
                 n_episodes=2, training_episodes=10, horizon=5, calibration_scores=[0.1] * 20,
                 save_plots=False, verbose=False,
             )
@@ -191,6 +195,7 @@ class OnlineSettingsTests(unittest.TestCase):
             for name, settings in cases.items():
                 with self.subTest(setting=name):
                     controller = main(
+                        mdp=Robot2DMotionMDP(),
                         n_episodes=1, training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
                         **settings,
@@ -202,7 +207,7 @@ class OnlineSettingsTests(unittest.TestCase):
                     self.assertEqual(record["transition_count"],
                                      previous_count + record["episode_length"])
                     if name == "nominal":
-                        self.assertIs(controller.agent, previous_agent)
+                        self.assertIsNot(controller.agent, previous_agent)
                         self.assertEqual(record["R_used"], 0)
                         self.assertEqual(record["planning_radius"], 0)
                     else:
@@ -214,6 +219,43 @@ class OnlineSettingsTests(unittest.TestCase):
                         self.assertEqual(controller.calibrator.n_updates, 0)
                     else:
                         self.assertEqual(controller.calibrator.n_updates, 2)
+
+    def test_episode_maps_noise_and_saved_truth_match_the_actual_rollouts(self):
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_shifting_noise_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+        ):
+            controller = main(
+                mdp=Robot2DMotionMDP(), n_episodes=3, training_episodes=10, horizon=20,
+                calibration_scores=[0.6] * 20, shift_period=10,
+                save_plots=True, verbose=False,
+            )
+            maps = []
+            for row in controller.history:
+                self.assertEqual(len(row["obstacles"]), 10)
+                self.assertLessEqual(row["score"], row["true_support"])
+                np.testing.assert_array_equal(row["mismatches"], row["deviations"] > 0)
+                np.testing.assert_allclose(
+                    row["positions"][1:], row["nominal_positions"] + row["deviation_vectors"],
+                )
+                maps.append(set(row["obstacles"]))
+            self.assertNotEqual(maps[0], maps[1])
+            self.assertNotEqual(maps[1], maps[2])
+            np.testing.assert_array_equal(
+                controller.training_env.obstacle_mask, controller.deployment_env.obstacle_mask,
+            )
+            self.assertTrue(controller.training_env.is_nominal)
+            np.testing.assert_array_equal(controller.Q[controller.training_env.terminal_mask], 0)
+            self.assertFalse(any(row["training_reused"] for row in controller.history))
+            output_dir = Path(directory) / "saved_results/online"
+            with (output_dir / "results_proposed_RNone_CNone_trial_1.pkl").open("rb") as file:
+                saved = pickle.load(file)
+            self.assertEqual(saved["true_R"], 0.2)
+            self.assertEqual(saved["shift_period"], 10)
+            self.assertEqual(saved["history"][-1]["obstacles"], controller.history[-1]["obstacles"])
+            saved_mdp = saved["mdp"]
+            deviation = saved_mdp._sample_deviation(saved_mdp.coordinates(saved_mdp.start_state))
+            self.assertLessEqual(np.linalg.norm(deviation), saved_mdp.noise_radius)
 
     def test_exit_counts_one_transition_and_calibrates_the_raw_disturbance(self):
         mdp = Robot2DMotionMDP(
