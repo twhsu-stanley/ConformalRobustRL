@@ -27,18 +27,18 @@ def sample_deviation(nominal_position, rng, *, radius, R_star):
     return deviation
 
 
-def randomize_obstacles(mdp, rng):
+def randomize_obstacles(mdp, rng, n_obstacles=10):
     """Place ten obstacles at least two cell indices from start and goal, with a path."""
     candidates = [
         (ix, iy) for iy in range(mdp.ny) for ix in range(mdp.nx)
         if all(max(abs(ix - sx), abs(iy - sy)) >= 2
                for sx, sy in (mdp.start_cell, mdp.goal_cell))
     ]
-    if len(candidates) < 10:
-        raise ValueError("The grid has too few eligible cells for ten obstacles.")
+    if len(candidates) < n_obstacles:
+        raise ValueError(f"The grid has too few eligible cells for {n_obstacles} obstacles.")
     previous = set(map(tuple, np.argwhere(mdp.obstacle_mask)[:, ::-1]))
     for _ in range(1000):
-        indices = rng.choice(len(candidates), size=10, replace=False)
+        indices = rng.choice(len(candidates), size=n_obstacles, replace=False)
         obstacles = [candidates[index] for index in indices]
         if set(obstacles) == previous:
             continue
@@ -47,4 +47,4 @@ def randomize_obstacles(mdp, rng):
         except ValueError:
             continue
         return obstacles
-    raise ValueError("Could not sample a ten-obstacle map with a start-to-goal path.")
+    raise ValueError(f"Could not sample a {n_obstacles}-obstacle map with a start-to-goal path.")

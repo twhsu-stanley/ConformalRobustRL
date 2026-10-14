@@ -38,7 +38,6 @@ def main(
         raise ValueError("This shifting-noise experiment requires unit grid cells.")
     if not np.isfinite(R_star) or not 0 < R_star < 1:
         raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
-    C_star_shift(0, shift_period)
 
     def prepare_episode(controller, episode):
         radius = C_star_shift(episode, shift_period)
@@ -103,23 +102,23 @@ if __name__ == "__main__":
     mdp = Robot2DMotionMDP(
         x_max=10.0, y_max=10.0, grid_shape=(10, 10),
         obstacles=[],
-        start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.01, goal_reward=1.0,
+        start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.001, goal_reward=1.0,
     )
 
     seeds = (67,)
-    methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.3")
-    n_deployment_episodes = 80
-    training_episodes = 4000
-    pilot_episodes = 100
+    methods = ("proposed", "nominal")#, "R_contamination_0.1", "R_contamination_0.3")
+    n_deployment_episodes = 40
+    training_episodes = 5000
+    pilot_episodes = 200
     R_star = 0.2
-    shift_period = 40
+    shift_period = 100
     for trial, seed in enumerate(seeds, 1):
         mdp.set_obstacles([])
-        randomize_obstacles(mdp, np.random.default_rng(seed))
+        randomize_obstacles(mdp, np.random.default_rng(seed), 20)
         shared_scores = None
         for index, method in enumerate(methods):
             controller = main(
-                mdp=mdp, method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
+                mdp=mdp, gamma=0.9, method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
                 n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
                 eta=0.1, calibration_window=200, pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
                 R_star=R_star, shift_period=shift_period,
