@@ -26,9 +26,12 @@ def main(
 
     method='nominal' plans with R=0; method='global' plans with C=infinity.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
-    Each episode has a new ten-obstacle map and a fixed disturbance law. The
-    support bound varies slowly within [0.5, 2.0], while true_R stays constant.
+    The supplied obstacle map stays fixed throughout the run. Each episode has
+    a fixed disturbance law whose support bound varies slowly within [0.5, 2.0],
+    while true_R stays constant.
     These true simulator parameters are not supplied to the Q-learning agent.
+    The trial loop generates one map and passes it to every method. Matching
+    shift_period gives methods the same support schedule even when pilots are skipped.
     """
     if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
         raise ValueError("This shifting-noise experiment requires unit grid cells.")
@@ -37,16 +40,13 @@ def main(
     support_radius(0, shift_period)
 
     def prepare_episode(controller, episode):
-        obstacles = randomize_obstacles(controller.training_env, controller.rng)
-        controller.deployment_env.set_obstacles(obstacles)
         radius = support_radius(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
             sample_deviation, radius=radius, true_R=true_R,
         )
         controller.deployment_env.is_nominal = False
-        controller.agent = None  # A new map requires a new policy, including the nominal baseline.
-        return {"obstacles": obstacles, "true_support": radius}
+        return {"true_support": radius}
 
     controller = ConformallyRobustController(
         mdp, gamma=gamma, horizon=horizon, training_horizon=horizon,
@@ -113,12 +113,14 @@ if __name__ == "__main__":
     true_R = 0.2
     shift_period = 100
     for trial, seed in enumerate(seeds, 1):
+        mdp.set_obstacles([])
+        randomize_obstacles(mdp, np.random.default_rng(seed))
         shared_scores = None
         for index, method in enumerate(methods):
             controller = main(
                 mdp=mdp, method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
                 n_episodes=n_episodes, training_episodes=training_episodes,
-                pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
+                eta=0.1, pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
                 true_R=true_R, shift_period=shift_period,
             )
             shared_scores = controller.initial_calibration_scores

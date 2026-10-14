@@ -69,15 +69,15 @@ class ConformallyRobustController:
             "step_start_decay_lr": step_start_decay_lr, "epsilon_init": epsilon_init,
             "epsilon_lb": epsilon_lb, "epsilon_decay_rate": epsilon_decay_rate,
         }
-        self.calibration_options = {
+        self.acp_options = {
             "target_failure": target_failure, "initial_failure": initial_failure,
             "eta": eta, "window_size": calibration_window,
         }
         # Validate calibration settings before any potentially expensive pilot run.
-        validated = ACP([0.0], **self.calibration_options)
+        validated = ACP([0.0], **self.acp_options)
         self.calibrator = None
         if calibration_scores is not None:
-            self.calibrator = ACP(calibration_scores, **self.calibration_options)
+            self.calibrator = ACP(calibration_scores, **self.acp_options)
             self.initial_calibration_scores = list(self.calibrator.scores)
         elif self.pilot_episodes == 0:
             raise ValueError("Provide calibration_scores or request at least one pilot episode.")
@@ -98,7 +98,7 @@ class ConformallyRobustController:
                 self.episode_setup(self, episode)
             record = self.deployment_env.deploy_policy(random_policy, self.gamma)
             self.pilot_scores.append(record["score"])
-        self.calibrator = ACP(self.pilot_scores, **self.calibration_options)
+        self.calibrator = ACP(self.pilot_scores, **self.acp_options)
         self.initial_calibration_scores = list(self.calibrator.scores)
 
     def run_episode(self):

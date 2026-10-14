@@ -43,9 +43,12 @@ for a single run. For example:
 from robot_2d.main_robot_2d_online import main
 from robot_2d.plot_online_comparison import plot_comparison
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+from robot_2d.online_settings import randomize_obstacles
+import numpy as np
 
 # Run Algorithm 2 alone.
 mdp = Robot2DMotionMDP(x_max=10, y_max=10, grid_shape=(10, 10), obstacles=[])
+randomize_obstacles(mdp, np.random.default_rng(87))
 controller = main(
     mdp=mdp, n_episodes=100, training_episodes=4000, pilot_episodes=100,
     true_R=0.2, shift_period=100, save_plots=False,
@@ -64,7 +67,7 @@ These continuation calls do not rewrite the files previously saved by `main()`.
 | Method | Planning R | Planning C | Training |
 | --- | --- | --- | --- |
 | `proposed` | Cumulative mismatch estimate | Pre-episode ACP radius | Fresh zero Q-table each episode |
-| `nominal` | 0 | 0 | Fresh zero Q-table for each new obstacle map |
+| `nominal` | 0 | 0 | Train once per trial and reuse the policy |
 | `global` | Its own cumulative mismatch estimate | Positive infinity | Fresh zero Q-table each episode |
 
 The global method implements the globally supported R-contamination comparison
@@ -119,8 +122,12 @@ Each method maintains its own subsequent R estimate and calibration history.
 Simulation draws ordinary random disturbances, with separate run seeds for the
 methods. No disturbance tapes are used. The stored
 run seed is `seed + 100000 * method_index` in the requested method order.
-All methods use the same support schedule and true R-star. Their obstacle maps
-are independent draws from the same placement rule.
+Each trial generates one ten-obstacle map from its base seed before running any
+method. The map stays fixed for all pilots, online episodes, and methods in that
+trial. A new trial generates its own map. All methods share the same support
+schedule and true R-star, while retaining distinct training/deployment seeds.
+For separate calls to `main()`, pass the same prepared MDP and matching `shift_period`.
+`main()` preserves the supplied map, and continuing a controller keeps that map.
 
 `pilot_episodes` supplies the initial calibration dataset S_cal required by Algorithm 2.
 When `calibration_scores` is absent, the robot runs this many random-policy episodes
@@ -134,8 +141,9 @@ uses fresh randomness. The fixed-R/C runner seeds each trial's Q-learning agent;
 its deterministic nominal MDP needs no seed. The online controller derives seeds for
 the deployment MDP and each new training agent from the run's generator. Each generator
 is initialized once; nominal training resets and deployment episodes do not reseed it.
-Pilot actions and obstacle maps use the controller's generator, exploration uses
-the agent's generator, and disturbances use the MDP's generator. Plotting uses no randomness.
+Pilot actions use the controller's generator, exploration uses the agent's generator,
+and disturbances use the MDP's generator. A separate generator initialized from the
+base trial seed samples the obstacle map once in the trial loop. Plotting uses no randomness.
 
 The MDP retains Gymnasium's optional `reset(seed=...)` argument. An explicit seed
 restarts its disturbance generator for repeatable sampling; `reset()` preserves
@@ -148,11 +156,11 @@ The main scripts configure the closed workspace `[0, 10] x [0, 10]`, divided int
 10-by-10 unit cells, with start `(0.5, 0.5)` and goal `(9.5, 9.5)`.
 The uncertainty neighborhood uses closed grid cells. Discretization chooses the
 upper-index cell at internal ties and an interior cell at the upper workspace boundary.
-Every online episode, including each pilot, samples exactly ten distinct obstacle cells.
+Every trial samples exactly ten distinct obstacle cells.
 The Chebyshev distance in cell indices from every obstacle to both start and goal
-must be at least two. Maps are resampled if they disconnect start from goal or repeat
-the previous map. The same map is used for nominal training and physical deployment
-and stays fixed throughout that episode. `set_obstacles()` rebuilds the MDP's reward
+must be at least two. Maps are resampled if they disconnect start from goal.
+The same map is used for nominal training and physical deployment and stays fixed
+throughout the trial. `set_obstacles()` rebuilds the MDP's reward
 table, terminal mask, trainable states, and nominal transitions together.
 The standalone fixed-R/C runner retains its fixed obstacles `(5, 1), (1, 3), (5, 6)`.
 Cells are indexed by `(ix, iy)` with discrete state `s = ix + nx * iy`.
@@ -241,8 +249,9 @@ C uses physical distance, and rectangular grids account for both cell widths.
 `main_robot_2d_online.py` configures `ConformallyRobustController`, calls its
 `run()`, then saves and plots. The controller's `run_episode()` is the
 single implementation of training and R/ACP updates for all experiment settings.
-An optional episode-setup callback prepares maps and disturbance laws before pilots
-and before each online training/deployment episode. It also runs during continuation.
+The trial loop prepares the obstacle map before running the methods. An optional
+episode-setup callback sets the disturbance law before pilots and before each online
+training/deployment episode. It also runs during continuation.
 `Robot2DMotionMDP.deploy_policy()` is the single continuous rollout routine shared
 by random-policy pilots and online deployment.
 Robot-specific dynamics and plotting remain under `robot_2d/`.
@@ -258,10 +267,11 @@ explicitly, including when adapting a bare Gym environment such as FrozenLake.
 
 For each online episode:
 
-1. Randomize the obstacle map and set the episode's physical disturbance law.
+1. Set the episode's physical disturbance law while keeping the trial map fixed.
 2. Predict the conformal radius using scores available before deployment, and
    select the pre-episode R estimate.
-3. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C.
+3. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C;
+   the nominal baseline reuses its policy after the first training call.
 4. Deploy until a terminal condition or the step limit, recording every landing,
    reward, mismatch, and disturbance, including the final transition.
 5. Update R as total discrete mismatches divided by total online transitions.
@@ -277,7 +287,7 @@ Exploring starts cycle through shuffled nonterminal state-action pairs. The
 controller uses learning rate 0.5 for the first 100,000 training transitions,
 then per-pair harmonic decay. Its epsilon schedule starts at 1.0, decays by 0.995
 per training episode, and has a floor of 0.1. All changing planning problems use
-fresh zero Q-tables. The nominal baseline also retrains when its map changes.
+fresh zero Q-tables. The nominal baseline trains once on the fixed trial map.
 Finite Q-learning approximates the robust optimum; inspect saved Bellman residuals
 and unvisited pairs when selecting a common training budget across methods.
 
@@ -323,7 +333,7 @@ and pre-episode radii,
 cumulative episode coverage, trailing-window coverage, and the mean number of
 states in localized neighborhoods compared with the 101-state global support.
 The support-size diagnostic averages over nominal targets of nonterminal
-state-action pairs using each episode's actual obstacle map.
+state-action pairs using the fixed trial map.
 `plot_comparison(window=10)` controls the trailing
 coverage window independently of the calibration window used during the run.
 
@@ -407,7 +417,7 @@ the uncertainty-set construction in Section IV-A.
 
 Pilots use the same periodic schedule at indices `-pilot_episodes, ..., -1`;
 online episodes start at index zero. Shared calibration scores skip those pilots.
-The cumulative R estimate and ACP history persist across map and distribution changes.
+The cumulative R estimate and ACP history persist across distribution changes.
 
 Changing the radius alone generally changes R-star and violates Assumption 5.
 When the true R varies, the cumulative estimator summarizes past transition
@@ -436,8 +446,8 @@ Each run record contains settings, the configured MDP, initial and pilot scores,
 final R and ACP parameter, full online histories, final Q/policy, state-action
 visit counts.
 Q has shape `(101, 4)` and policy has shape `(101,)` on the
-configured online grid; the failure row is zero. Each history records its ten obstacle
-cells and true support bound, pre-episode planning R/C, raw
+configured online grid; the failure row is zero. The fixed obstacle map is saved once
+in the MDP. Each history records its true support bound, pre-episode planning R/C, raw
 conformal radius, score, miscoverage, ACP parameters before/after, cumulative
 counts, training diagnostics, original deviation vectors, continuous positions,
 extended-grid quantized positions, episode length, and terminal outcome.
@@ -465,7 +475,7 @@ different trial number to retain another run. The script numbers trials from one
 independently of their seeds. The comparison plotter reads the matching files directly.
 Results from previous projected, padded, or resetting deployments require rerunning
 to produce the current terminal episodes, transition counts, and trajectory fields.
-Runs from the former fixed-map experiment must also be regenerated for this comparison.
+Runs from the former changing-map experiment must also be regenerated for this comparison.
 
 ## Algorithm 1 alone and its learning curves
 
@@ -516,4 +526,5 @@ lengths, continuous noise without projection, workspace-exit planning, terminal
 transition recording, saved run files and policy plots,
 script imports, and controller continuation with retained experiment settings.
 They also check randomized map protection and reachability, slow support shifts,
-and the common mismatch probability across nominal targets, including boundaries.
+the common mismatch probability across nominal targets, including boundaries,
+and a fixed trial map with paired support schedules across methods, pilots, and continuation.

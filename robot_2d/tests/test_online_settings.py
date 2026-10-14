@@ -10,6 +10,15 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 class EpisodeSettingsTests(unittest.TestCase):
+    def test_trial_maps_reproduce_the_seed_and_change_for_another_seed(self):
+        maps = []
+        for seed in (87, 87, 88):
+            mdp = Robot2DMotionMDP(x_max=10, y_max=10, grid_shape=(10, 10))
+            randomize_obstacles(mdp, np.random.default_rng(seed))
+            maps.append(mdp.obstacle_mask.copy())
+        np.testing.assert_array_equal(maps[0], maps[1])
+        self.assertFalse(np.array_equal(maps[0], maps[2]))
+
     def test_support_cycles_gradually_within_requested_bounds(self):
         radii = np.array([support_radius(episode) for episode in range(201)])
         self.assertGreater(radii.min(), 0.5)
