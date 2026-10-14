@@ -60,16 +60,16 @@ class RobotMotionModelTests(unittest.TestCase):
         self.assertEqual(mdp.discretize((0, 8)), 56)
         self.assertEqual(mdp.discretize((0, 0)), 0)
         self.assertEqual(mdp.discretize((2, 1)), 9)
-        self.assertEqual(mdp.discretize((np.nextafter(16.0, np.inf), 8)), mdp.failure_state)
-        self.assertEqual(mdp.discretize((16, np.nextafter(8.0, np.inf))), mdp.failure_state)
-        self.assertEqual(mdp.discretize((-0.01, 0)), mdp.failure_state)
+        self.assertEqual(mdp.discretize((np.nextafter(16.0, np.inf), 8)), mdp.exit_state)
+        self.assertEqual(mdp.discretize((16, np.nextafter(8.0, np.inf))), mdp.exit_state)
+        self.assertEqual(mdp.discretize((-0.01, 0)), mdp.exit_state)
         np.testing.assert_allclose(mdp.quantize((-0.01, 0)), (-1, 0.5))
         np.testing.assert_allclose(mdp.quantize((16, 8)), (15, 7.5))
 
     def test_reset_rejects_terminal_states_and_positions(self):
         mdp = Robot2DMotionMDP()
         obstacle = mdp.cell_to_state((2, 1))
-        for state in (mdp.goal_state, obstacle, mdp.failure_state):
+        for state in (mdp.goal_state, obstacle, mdp.exit_state):
             with self.subTest(state=state), self.assertRaisesRegex(ValueError, "nonterminal"):
                 mdp.reset(options={"state": state})
         for position in (mdp.coordinates(mdp.goal_state), mdp.coordinates(obstacle), (8.1, 0)):
@@ -129,7 +129,7 @@ class RobotMotionModelTests(unittest.TestCase):
         )
         successor, _, terminated, _, info = mdp.step(1)
         np.testing.assert_allclose(info["position"], (10.5, 0.5))
-        self.assertEqual(successor, mdp.failure_state)
+        self.assertEqual(successor, mdp.exit_state)
         self.assertTrue(terminated)
         self.assertTrue(info["workspace_exit"])
         self.assertTrue(info["boundary_violation"])
@@ -143,17 +143,17 @@ class RobotMotionModelTests(unittest.TestCase):
         self.assertEqual(len(mdp.localized_uncertainty_states(center, np.inf)), 65)
         mdp = Robot2DMotionMDP(x_max=4, y_max=2, grid_shape=(2, 2))
         self.assertEqual(
-            mdp.localized_uncertainty_states(0, 0.6).tolist(), [0, 2, mdp.failure_state],
+            mdp.localized_uncertainty_states(0, 0.6).tolist(), [0, 2, mdp.exit_state],
         )
 
     def test_robust_planning_accounts_for_workspace_exit(self):
         mdp = Robot2DMotionMDP(obstacles=[])
         edge = mdp.cell_to_state((0, 2))
-        self.assertNotIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.5 - 1e-8))
-        self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.5))
-        self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(edge, 0.6))
+        self.assertNotIn(mdp.exit_state, mdp.localized_uncertainty_states(edge, 0.5 - 1e-8))
+        self.assertIn(mdp.exit_state, mdp.localized_uncertainty_states(edge, 0.5))
+        self.assertIn(mdp.exit_state, mdp.localized_uncertainty_states(edge, 0.6))
         upper_edge = mdp.cell_to_state((7, 2))
-        self.assertIn(mdp.failure_state, mdp.localized_uncertainty_states(upper_edge, 0.5))
+        self.assertIn(mdp.exit_state, mdp.localized_uncertainty_states(upper_edge, 0.5))
         agent = Tabular_Agent(mdp, gamma=0.9, lr_init=0.5, R=0.25, C=0.6)
         values = np.full(mdp.n_state, 0.8)
         values[mdp.terminal_mask] = 0
@@ -169,7 +169,7 @@ class RobotMotionModelTests(unittest.TestCase):
             for radius in (distance - 1e-8, distance, distance + 1e-8):
                 with self.subTest(cell=cell, radius=radius):
                     states = mdp.localized_uncertainty_states(state, radius)
-                    self.assertEqual(mdp.failure_state in states, radius >= distance)
+                    self.assertEqual(mdp.exit_state in states, radius >= distance)
 
     def test_goal_ends_the_episode_before_followup_transitions(self):
         mdp = Robot2DMotionMDP(
@@ -294,7 +294,8 @@ class ResultsDirectoryTests(unittest.TestCase):
                             plt.close(figure)
                         online_main(
                             mdp=Robot2DMotionMDP(),
-                            n_episodes=1, training_episodes=10, horizon=5, pilot_episodes=2,
+                            n_deployment_episodes=1, training_episodes=10, horizon=5,
+                            pilot_episodes=2,
                         )
                 files = [path for path in root.rglob("*") if path.is_file()]
                 self.assertEqual(len(files), 16)
@@ -334,28 +335,29 @@ class OnlineRunnerTests(unittest.TestCase):
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
             root = Path(directory)
-            for n_episodes in (1, 2):
-                with self.subTest(n_episodes=n_episodes):
+            for n_deployment_episodes in (1, 2):
+                with self.subTest(n_deployment_episodes=n_deployment_episodes):
                     output_dir = root / "saved_results/online"
                     with redirect_stdout(io.StringIO()):
                         controller = online_main(
                             mdp=Robot2DMotionMDP(),
-                            training_episodes=10, horizon=5, n_episodes=n_episodes,
-                            pilot_episodes=2, save_plots=False, trial=n_episodes,
+                            training_episodes=10, horizon=5,
+                            n_deployment_episodes=n_deployment_episodes,
+                            pilot_episodes=2, save_plots=False, trial=n_deployment_episodes,
                         )
-                    filename = f"results_proposed_RNone_CNone_trial_{n_episodes}.pkl"
+                    filename = f"results_proposed_RNone_CNone_trial_{n_deployment_episodes}.pkl"
                     with (output_dir / filename).open("rb") as file:
                         results = pickle.load(file)
                     history = results["history"]
-                    self.assertEqual(len(history), n_episodes)
+                    self.assertEqual(len(history), n_deployment_episodes)
                     count = sum(record["episode_length"] for record in history)
                     self.assertEqual(history[-1]["transition_count"], count)
                     self.assertEqual(history[0]["R_used"], 0.1)
                     self.assertTrue(
                         all(record["training"]["zero_initialized"] for record in history)
                     )
-                    self.assertEqual(results["final_R"], controller.R_estimate)
-                    self.assertEqual(results["final_delta"], controller.calibrator.delta)
+                    self.assertEqual(results["final_R"], controller.R_hat)
+                    self.assertEqual(results["final_delta"], controller.calibrator.delta_k)
                     self.assertNotIn("evaluation", results)
                     self.assertFalse(hasattr(controller, "results"))
                     self.assertEqual(results["Q"].shape, (65, 4))
@@ -364,7 +366,7 @@ class OnlineRunnerTests(unittest.TestCase):
                     np.testing.assert_array_equal(results["policy"], controller.policy)
                     np.testing.assert_array_equal(results["visit_counts"],
                                                   controller.agent.visit_counts)
-                    self.assertEqual(len(list(output_dir.iterdir())), n_episodes)
+                    self.assertEqual(len(list(output_dir.iterdir())), n_deployment_episodes)
             self.assertFalse(list(root.rglob("*.json")))
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     if trajectory is not None:
         trajectory = np.asarray(trajectory)
         axes[1].plot(trajectory[:, 0], trajectory[:, 1], "o-", color="tab:orange", markersize=3)
-        exits = np.array([mdp.discretize(x) == mdp.failure_state for x in trajectory])
+        exits = np.array([mdp.discretize(x) == mdp.exit_state for x in trajectory])
         if np.any(exits):
             axes[1].plot(*trajectory[exits].T, "rx", markersize=9, label="Workspace exit")
             lo = np.minimum(np.min(trajectory, axis=0), 0) - 0.2 * mdp.cell_widths
@@ -68,24 +68,26 @@ def plot_robot_2d_tabular(mdp, agent, *, show=True):
     return fig
 
 
-def plot_conformal_history(history, target_failure):
-    """Keep raw conformal coverage distinct from the radius used by the planner."""
+def plot_conformal_history(history, delta):
+    """Plot C_hat coverage and coverage of C_used after method overrides."""
     if not history:
         raise ValueError("At least one deployment episode is required for plotting.")
     fig, axes = plt.subplots(3, 2, figsize=(12, 11), constrained_layout=True)
     episodes = np.arange(1, len(history) + 1)
     axes = axes.ravel()
     axes[0].plot(episodes, [item["R_used"] for item in history], label="R used for training")
-    axes[0].plot(episodes, [item["R_next"] for item in history], label="Updated mismatch estimate")
+    axes[0].plot(
+        episodes, [item["R_hat_next"] for item in history], label="Updated mismatch estimate",
+    )
     axes[0].set(title="Discrete transition mismatches", ylabel="Probability", ylim=(0, 1))
     scores = np.asarray([item["score"] for item in history])
-    radii = np.asarray([item["conformal_radius"] for item in history])
+    radii = np.asarray([item["C_hat"] for item in history])
     finite_radii = np.where(np.isfinite(radii), radii, np.nan)
     ceiling = max(1.0, np.max(scores), np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
     axes[1].plot(episodes, scores, label="Episode maximum deviation")
     axes[1].plot(episodes, finite_radii, label="Conformal radius")
-    if "true_support" in history[0]:
-        support_bounds = [item["true_support"] for item in history]
+    if "C_star_k" in history[0]:
+        support_bounds = [item["C_star_k"] for item in history]
         axes[1].plot(episodes, support_bounds, "k:", label="True C*")
         ceiling = max(ceiling, max(support_bounds) * 1.1)
     if np.any(np.isposinf(radii)):
@@ -93,20 +95,15 @@ def plot_conformal_history(history, target_failure):
             episodes[np.isposinf(radii)], np.full(np.isposinf(radii).sum(), ceiling),
             marker="^", label="Unbounded prediction",
         )
-    if np.any(np.isneginf(radii)):
-        axes[1].scatter(
-            episodes[np.isneginf(radii)], np.zeros(np.isneginf(radii).sum()),
-            marker="x", label="Empty prediction; planner radius 0",
-        )
     axes[1].set(title="Continuous uncertainty", ylabel="Distance")
-    axes[2].plot(episodes, [item["delta_before"] for item in history], label="Adaptive delta")
-    axes[2].axhline(target_failure, color="black", linestyle="--", label="Target failure")
+    axes[2].plot(episodes, [item["delta_k"] for item in history], label="Adaptive delta")
+    axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
     axes[2].set(title="ACP update", ylabel="Failure parameter")
     miscoverage = np.asarray([item["miscoverage"] for item in history])
     planned = np.asarray([item["planned_miscoverage"] for item in history])
     axes[3].plot(episodes, 1 - np.cumsum(miscoverage) / episodes, label="Conformal coverage")
     axes[3].plot(episodes, 1 - np.cumsum(planned) / episodes, label="Planning-radius coverage")
-    axes[3].axhline(1 - target_failure, color="black", linestyle="--", label="Coverage target")
+    axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
     axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
     returns = [item["discounted_return"] for item in history]
     axes[4].plot(episodes, returns, label="Discounted r(s,a)")

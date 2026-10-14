@@ -56,7 +56,7 @@ def mismatch_probabilities(mdp):
         nominal_mass = area / (np.pi * mdp.noise_radius**2)
         probability = mdp.noise_probability * (1 - nominal_mass)
     result = np.full((mdp.n_state, mdp.action_space.n), probability)
-    result[mdp.failure_state] = 0  # Outside outcomes are never decision states.
+    result[mdp.exit_state] = 0  # Outside outcomes are never decision states.
     return np.clip(result, 0, 1)
 
 
@@ -68,11 +68,11 @@ def plot_R(runs, delta_R=0.05):
     estimates, probabilities, transition_counts = [], [], []
     for run in runs:
         mdp = run["mdp"]
-        probability = run.get("true_R")
+        probability = run.get("R_star")
         if probability is None:
             probability = mismatch_probabilities(mdp)[mdp.start_state, 0]
         probabilities.append(probability)
-        estimate = np.asarray([row["R_next"] for row in run["history"]])
+        estimate = np.asarray([row["R_hat_next"] for row in run["history"]])
         estimates.append(estimate)
         counts = np.asarray([row["transition_count"] for row in run["history"]])
         transition_counts.extend(counts)
@@ -96,30 +96,27 @@ def plot_calibration(runs, window):
     fig, axes = plt.subplots(2, 2, figsize=(11, 8), constrained_layout=True)
     history = runs[0]["history"]
     episodes = np.arange(1, len(history) + 1)
-    radii = np.asarray([row["conformal_radius"] for row in history])
+    radii = np.asarray([row["C_hat"] for row in history])
     scores = [row["score"] for row in history]
     axes[0, 0].plot(episodes, scores, ".", label="Episode maximum continuous deviation")
     axes[0, 0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label="Predicted C")
-    support_bounds = [row.get("true_support", runs[0]["mdp"].noise_radius) for row in history]
-    if "true_support" in history[0]:
+    support_bounds = [row.get("C_star_k", runs[0]["mdp"].noise_radius) for row in history]
+    if "C_star_k" in history[0]:
         axes[0, 0].plot(episodes, support_bounds, "k:", label="True support bound C*")
     ceiling = max(1, max(support_bounds), max(scores)) * 1.1
-    for tail, level, marker, label in (
-        (np.isposinf(radii), ceiling, "^", "Unbounded"),
-        (np.isneginf(radii), 0, "x", "Empty; planner uses C=0"),
-    ):
-        if np.any(tail):
-            axes[0, 0].scatter(
-                episodes[tail], np.full(sum(tail), level), marker=marker, label=label,
-            )
+    unbounded = np.isposinf(radii)
+    if np.any(unbounded):
+        axes[0, 0].scatter(
+            episodes[unbounded], np.full(sum(unbounded), ceiling), marker="^", label="Unbounded",
+        )
     all_misses, rolling_misses, frozen_misses, sizes = [], [], [], []
     for run in runs:
         quantile = ACP(
-            run["initial_calibration_scores"], target_failure=run["target_failure"],
-            initial_failure=run["initial_failure"], window_size=run["calibration_window"],
+            run["initial_calibration_scores"], delta=run["delta"],
+            delta_1=run["delta_1"], window_size=run["calibration_window"],
         )
         frozen_radius = quantile.quantile()
-        quantile.delta = run["target_failure"]
+        quantile.delta_k = run["delta"]
         fixed, frozen, support = [], [], []
         mdp = run["mdp"].clone(nominal=True)
         for row in run["history"]:
@@ -128,7 +125,7 @@ def plot_calibration(runs, window):
             quantile.scores.append(row["score"])
             if "obstacles" in row:
                 mdp.set_obstacles(row["obstacles"])
-            radius = row["planning_radius"]
+            radius = row["C_used"]
             counts = [len(mdp.localized_uncertainty_states(s, radius)) for s in range(mdp.n_state)]
             nominal_targets = mdp.nominal_transitions[mdp.trainable_states]
             support.append(np.mean(np.asarray(counts)[nominal_targets]))
@@ -154,7 +151,7 @@ def plot_calibration(runs, window):
         coverage = 1 - np.cumsum(planned, axis=1) / episodes
         axes[0, 1].plot(episodes, np.mean(coverage, axis=0), "-.", label="Planning-radius coverage")
     for axis in (axes[0, 1], axes[1, 0]):
-        axis.axhline(1 - runs[0]["target_failure"], color="black", linestyle=":", label="Target")
+        axis.axhline(1 - runs[0]["delta"], color="black", linestyle=":", label="Target")
         axis.set_ylim(0, 1.02)
     axes[1, 1].plot(episodes, np.mean(sizes, axis=0), label="Localized support")
     axes[1, 1].axhline(runs[0]["mdp"].n_state, color="black", linestyle=":", label="Global support")

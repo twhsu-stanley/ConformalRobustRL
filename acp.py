@@ -7,17 +7,15 @@ import numpy as np
 
 
 class ACP:
-    """Preserve the paper's unconstrained delta update and extended quantile tails.
+    """Calibrate C_hat using target delta and the unconstrained adaptive delta_k.
 
-    A nonpositive rank gives an empty prediction (radius -infinity); a rank larger
-    than the calibration window gives an unbounded prediction (+infinity). Empty
-    predictions use radius zero for planning, while ACP still records miscoverage
-    against its original empty prediction. Both coverage quantities must be logged.
+    quantile() returns a nonnegative radius ready for planning. A nonpositive rank
+    returns zero; a rank above the calibration window returns positive infinity.
     """
 
-    def __init__(self, scores, target_failure=0.1, initial_failure=None, eta=0.01, window_size=100):
-        initial_failure = target_failure if initial_failure is None else initial_failure
-        if not 0 < target_failure < 1 or not 0 < initial_failure < 1:
+    def __init__(self, scores, delta=0.1, delta_1=None, eta=0.01, window_size=100):
+        delta_1 = delta if delta_1 is None else delta_1
+        if not 0 < delta < 1 or not 0 < delta_1 < 1:
             raise ValueError("Target and initial failure probabilities must be in (0, 1).")
         if not np.isfinite(eta) or eta <= 0:
             raise ValueError("ACP learning rate eta must be positive and finite.")
@@ -27,9 +25,9 @@ class ACP:
         if not scores:
             raise ValueError("An initial calibration dataset is required.")
         self.scores = deque(scores, maxlen=int(window_size))
-        self.target_failure = float(target_failure)
-        self.delta = float(initial_failure)
-        self.initial_delta = self.delta
+        self.delta = float(delta)
+        self.delta_k = float(delta_1)
+        self.delta_1 = self.delta_k
         self.eta = float(eta)
         self.n_updates = 0
 
@@ -40,18 +38,15 @@ class ACP:
         return float(score)
 
     def quantile(self):
-        rank = math.ceil((1 - self.delta) * (len(self.scores) + 1))
+        rank = math.ceil((1 - self.delta_k) * (len(self.scores) + 1))
         if rank <= 0:
-            return -np.inf
+            return 0.0
         if rank > len(self.scores):
             return np.inf
-        return float(np.partition(np.asarray(self.scores), rank - 1)[rank - 1])
-
-    @staticmethod
-    def planning_radius(conformal_radius):
-        if np.isnan(conformal_radius):
+        C_hat = float(np.partition(np.asarray(self.scores), rank - 1)[rank - 1])
+        if np.isnan(C_hat):
             raise ValueError("Conformal radius cannot be NaN.")
-        return max(0.0, float(conformal_radius))
+        return max(0.0, C_hat)
 
     def update(self, score, predicted_radius=None):
         score = self._validate_score(score)
@@ -59,10 +54,8 @@ class ACP:
         if np.isnan(predicted_radius):
             raise ValueError("Predicted radius cannot be NaN.")
         miscovered = int(score > predicted_radius)
-        previous_delta = self.delta
-        self.delta += self.eta * (self.target_failure - miscovered)
+        previous_delta = self.delta_k
+        self.delta_k += self.eta * (self.delta - miscovered)
         self.scores.append(score)
         self.n_updates += 1
-        return {
-            "miscoverage": miscovered, "delta_before": previous_delta, "delta_after": self.delta,
-        }
+        return {"miscoverage": miscovered, "delta_k": previous_delta, "delta_next": self.delta_k}

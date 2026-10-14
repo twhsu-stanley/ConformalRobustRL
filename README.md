@@ -50,8 +50,8 @@ import numpy as np
 mdp = Robot2DMotionMDP(x_max=10, y_max=10, grid_shape=(10, 10), obstacles=[])
 randomize_obstacles(mdp, np.random.default_rng(87))
 controller = main(
-    mdp=mdp, n_episodes=100, training_episodes=4000, pilot_episodes=100,
-    true_R=0.2, shift_period=100, save_plots=False,
+    mdp=mdp, n_deployment_episodes=100, training_episodes=4000, pilot_episodes=100,
+    R_star=0.2, shift_period=100, save_plots=False,
 )
 
 # Replot saved comparisons without training or deployment.
@@ -59,7 +59,7 @@ plot_comparison()
 ```
 
 `main()` returns the controller. Its experiment settings persist when calling
-`controller.run_episode()` or `controller.run(n_episodes)` to continue in memory.
+`controller.run_episode()` or `controller.run(n_deployment_episodes)` to continue in memory.
 These continuation calls do not rewrite the files previously saved by `main()`.
 
 ## Methods and settings
@@ -94,18 +94,18 @@ With `C=None`, ACP diagnostics are still collected for the nominal and global me
 | Argument to `main()` | Default | Meaning |
 | --- | --- | --- |
 | `mdp` | Required | Robot geometry and rewards; this experiment requires unit cells |
-| `n_episodes` | 30 | Outer deployment episodes |
+| `n_deployment_episodes` | 30 | Outer deployment episodes |
 | `training_episodes` | 4000 | Inner Algorithm 1 training episodes per call |
 | `horizon` | 100 | Maximum deployment and nominal training episode length |
 | `gamma` | 0.95 | Reward discount |
-| `initial_R` | 0.1 | Estimate used before any online deployment |
-| `target_failure` | 0.1 | Target long-run episode miscoverage |
-| `initial_failure` | `None` | Initial ACP parameter; `None` uses the target |
+| `R_hat_init` | 0.1 | Estimate used before any online deployment |
+| `delta` | 0.1 | Target long-run episode miscoverage |
+| `delta_1` | `None` | Initial ACP parameter; `None` uses the target |
 | `eta` | 0.01 | ACP update step size |
 | `calibration_window` | 100 | Maximum number of stored calibration scores |
 | `pilot_episodes` | 20 | Random-policy pilots when scores are not supplied |
 | `calibration_scores` | `None` | Optional initial episode maximum deviations |
-| `true_R` | 0.2 | Fixed true mismatch probability in the simulator |
+| `R_star` | 0.2 | Fixed true mismatch probability in the simulator |
 | `shift_period` | 100 | Number of episodes in one support-bound cycle |
 | `seed` | 7 | Random seed for a single run |
 | `trial` | 1 | Trial number used in the saved filename |
@@ -165,7 +165,7 @@ table, terminal mask, trainable states, and nominal transitions together.
 The standalone fixed-R/C runner retains its fixed obstacles `(5, 1), (1, 3), (5, 6)`.
 Cells are indexed by `(ix, iy)` with discrete state `s = ix + nx * iy`.
 Actions `0, 1, 2, 3` command `+x, -x, +y, -y`, respectively.
-The additional state `failure_state=100` represents workspace exit, giving 101 Q-table
+The additional state `exit_state=100` represents workspace exit, giving 101 Q-table
 rows. It aggregates outside cells for finite planning and has no cell center. The
 nominal function f(s,a) is unchanged on the original grid states, including outward
 commands that remain in the current cell. The failure row has zero value and reward.
@@ -256,6 +256,13 @@ training/deployment episode. It also runs during continuation.
 by random-policy pilots and online deployment.
 Robot-specific dynamics and plotting remain under `robot_2d/`.
 
+Names follow the paper: `R_hat` is the current estimate, `R_hat_next` is its
+post-episode update, `C_hat` is the ACP prediction, and `R_star`/`C_star_k` describe
+simulator truth. `R_used` and `C_used` are the actual Algorithm 1 inputs after
+method overrides. `delta` is the fixed ACP target, `delta_1` its initial parameter,
+and `delta_k`/`delta_next` its adaptive values before/after the episode update.
+The MDP uses `start_state`, `goal_state`, and `exit_state`.
+
 The MDP owns `reward(state, action)`, `terminal_mask`, `state_coordinates`, and
 `localized_uncertainty_states(nominal_next_state, C)`. The last method returns
 candidate state indices around the observed nominal successor and caches them in
@@ -306,7 +313,7 @@ transition count tau_k, together with the simultaneous bound from Lemma 5:
 `plot_comparison(delta_R=0.05)` sets its confidence parameter. The bound
 applies to each run; it is not a joint confidence statement across seeds.
 
-The new experiment has true R-star exactly equal to `true_R`, default 0.2.
+The new experiment has true R-star exactly equal to `R_star`, default 0.2.
 Every nonzero axis disturbance leaves the nominal unit cell, including for goal,
 obstacle, edge, and corner nominal successors. An outside landing counts as a mismatch.
 This reference is saved for plotting and is not supplied to Q-learning.
@@ -348,20 +355,22 @@ score `score_k=max_{0 <= t < episode_length} ||Delta_t||`, it updates:
 
 ```text
 miss_k = 1{score_k > predicted_C_k}
-delta_next = delta_k + eta*(target_failure - miss_k)
+delta_next = delta_k + eta*(delta - miss_k)
 ```
 
-The adaptive failure parameter is not clipped. The following tail-rank and planning
-fallback conventions are implementation choices not specified in Algorithm 2 of the draft.
-Nonpositive ranks produce an empty prediction with raw C=-infinity; planning uses C=0.
-Ranks above N produce C=+infinity. The plot marks both tails and separately shows planning-radius
-coverage when it differs from raw conformal coverage. Infinite radii are retained
-in saved data. A calibrated radius need not equal that episode's true support bound.
+The adaptive failure parameter `delta_k` is not clipped. `ACP.quantile()` returns a
+nonnegative `C_hat` directly: nonpositive ranks return zero, and ranks above N return
+positive infinity. These tail-rank conventions are implementation choices not specified
+in Algorithm 2 of the draft. A zero score is covered by a zero radius. Fixed C is
+validated and converted when selected; there is no separate planning-radius function.
+The plot marks unbounded predictions and shows `C_used` coverage when method overrides
+make it differ from `C_hat` coverage. Infinite radii are retained in saved data.
+A calibrated radius need not equal that episode's true support bound.
 
 For adaptive runs, the exact bookkeeping identity after K episodes is:
 
 ```text
-coverage(K) = 1 - target_failure + (delta_after_K - initial_delta)/(eta*K)
+coverage(K) = 1 - delta + (delta_next - delta_1)/(eta*K)
 ```
 
 The coverage target concerns long-run episode coverage of continuous deviations.
@@ -406,11 +415,11 @@ with consecutive changes below 0.048. The half-episode phase keeps the radius
 strictly above 0.5. At exactly 0.5, the current quantizer cannot provide a positive
 common mismatch probability for every nominal target, including the corner goal.
 
-At each transition, draw Delta=0 with probability `1-true_R`. Otherwise choose one
+At each transition, draw Delta=0 with probability `1-R_star`. Otherwise choose one
 of the four signed coordinate directions uniformly and draw its length uniformly
 between `(0.5+C_star_k)/2` and `C_star_k`. This length always exceeds half a unit cell,
 so every nonzero draw is a mismatch. The law ignores the state, action, and obstacle
-map; thus its conditional mismatch mean is exactly `true_R` at every counted step.
+map; thus its conditional mismatch mean is exactly `R_star` at every counted step.
 Its support reaches `C_star_k`, and its parameters stay fixed within the episode.
 This satisfies the common-R requirement of Assumptions 3 and 5 without changing
 the uncertainty-set construction in Section IV-A.
@@ -446,9 +455,9 @@ Each run record contains settings, the configured MDP, initial and pilot scores,
 final R and ACP parameter, full online histories, final Q/policy, state-action
 visit counts.
 Q has shape `(101, 4)` and policy has shape `(101,)` on the
-configured online grid; the failure row is zero. The fixed obstacle map is saved once
-in the MDP. Each history records its true support bound, pre-episode planning R/C, raw
-conformal radius, score, miscoverage, ACP parameters before/after, cumulative
+configured online grid; the exit row is zero. The fixed obstacle map is saved once
+in the MDP. Each history records `C_star_k`, `R_used`, `R_hat_next`, `C_hat`, `C_used`,
+score, miscoverage, `delta_k`, `delta_next`, cumulative
 counts, training diagnostics, original deviation vectors, continuous positions,
 extended-grid quantized positions, episode length, and terminal outcome.
 `states` and `positions` contain the initial observation followed by each actual
@@ -476,6 +485,7 @@ independently of their seeds. The comparison plotter reads the matching files di
 Results from previous projected, padded, or resetting deployments require rerunning
 to produce the current terminal episodes, transition counts, and trajectory fields.
 Runs from the former changing-map experiment must also be regenerated for this comparison.
+Saved files using the previous attribute and result-key names must be regenerated.
 
 ## Algorithm 1 alone and its learning curves
 

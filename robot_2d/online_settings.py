@@ -3,7 +3,7 @@
 import numpy as np
 
 
-def support_radius(episode, period=100):
+def C_star_shift(episode, period=100):
     """Slowly cycle within [0.5, 2.0], staying strictly above the half-cell threshold."""
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
@@ -11,14 +11,14 @@ def support_radius(episode, period=100):
     return float(0.5 + 1.5 * np.sin(np.pi * phase)**2)
 
 
-def sample_deviation(nominal_position, rng, *, radius, true_R):
+def sample_deviation(nominal_position, rng, *, radius, R_star):
     """Mix zero with axis displacements that always leave the nominal unit cell.
 
     The law ignores nominal_position, so it is the same at every state and action.
     Every nonzero draw has norm strictly above 0.5 and at most radius. Its support
-    reaches radius, and its mismatch probability is exactly true_R, even at exits.
+    reaches radius, and its mismatch probability is exactly R_star, even at exits.
     """
-    if rng.random() >= true_R:
+    if rng.random() >= R_star:
         return np.zeros(2)
     direction = int(rng.integers(4))
     magnitude = rng.uniform((0.5 + radius) / 2, radius)

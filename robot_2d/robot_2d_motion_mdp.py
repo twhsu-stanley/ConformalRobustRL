@@ -43,7 +43,7 @@ class Robot2DMotionMDP(gym.Env):
         self.grid_shape = (self.nx, self.ny)
         self.cell_widths = self.bounds / shape
         self.n_grid_states = self.nx * self.ny
-        self.failure_state = self.n_grid_states
+        self.exit_state = self.n_grid_states
         self.n_state = self.n_grid_states + 1
         self.observation_space = spaces.Discrete(self.n_state)
         self.action_space = spaces.Discrete(4)
@@ -113,14 +113,14 @@ class Robot2DMotionMDP(gym.Env):
 
     def state_to_cell(self, state):
         state = self._validate_state(state)
-        if state == self.failure_state:
-            raise ValueError("The workspace-failure state is not a grid cell.")
+        if state == self.exit_state:
+            raise ValueError("The workspace-exit state is not a grid cell.")
         return state % self.nx, state // self.nx
 
     def coordinates(self, state):
         state = self._validate_state(state)
-        if state == self.failure_state:
-            raise ValueError("The workspace-failure state has no cell center.")
+        if state == self.exit_state:
+            raise ValueError("The workspace-exit state has no cell center.")
         return self.state_coordinates[state].copy()
 
     def quantize(self, position):
@@ -137,7 +137,7 @@ class Robot2DMotionMDP(gym.Env):
         position = np.asarray(position, dtype=float)
         center = self.quantize(position)
         if np.any(position < 0) or np.any(position > self.bounds):
-            return self.failure_state
+            return self.exit_state
         indices = np.rint(center / self.cell_widths - 0.5).astype(int)
         return int(indices[0] + self.nx * indices[1])
 
@@ -222,8 +222,8 @@ class Robot2DMotionMDP(gym.Env):
             return cache[key]
         if np.isposinf(C):
             states = np.arange(self.n_state)
-        elif nominal_next_state == self.failure_state:
-            states = np.array([self.failure_state])
+        elif nominal_next_state == self.exit_state:
+            states = np.array([self.exit_state])
         else:
             center = self.coordinates(nominal_next_state)
             offsets = np.abs(self.state_coordinates[:self.n_grid_states] - center)
@@ -231,7 +231,7 @@ class Robot2DMotionMDP(gym.Env):
             states = np.flatnonzero(distances <= C + 1e-12)
             exit_distance = min(np.min(center), np.min(self.bounds - center))
             if exit_distance <= C + 1e-12:
-                states = np.append(states, self.failure_state)
+                states = np.append(states, self.exit_state)
         cache[key] = states
         return states
 
@@ -293,9 +293,9 @@ class Robot2DMotionMDP(gym.Env):
             "collision": bool(
                 self.s < self.n_grid_states and self.obstacle_mask.ravel()[self.s]
             ),
-            "workspace_exit": self.s == self.failure_state,
+            "workspace_exit": self.s == self.exit_state,
             "boundary_attempt": bool(self.boundary_commands[state, action]),
-            "boundary_violation": self.s == self.failure_state,
+            "boundary_violation": self.s == self.exit_state,
         }
         return self.s, self.reward(state, action), terminated, truncated, info
 

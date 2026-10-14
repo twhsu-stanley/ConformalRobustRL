@@ -44,7 +44,7 @@ class ContinuousDeploymentTests(unittest.TestCase):
         row = mdp.deploy_policy(np.ones(mdp.n_state, dtype=int), 0.95)
         np.testing.assert_allclose(row["positions"], [(0.5, 0.5), (-0.5, 0.5)])
         np.testing.assert_allclose(row["deviation_vectors"], [(-1, 0)])
-        np.testing.assert_array_equal(row["states"][1:], mdp.failure_state)
+        np.testing.assert_array_equal(row["states"][1:], mdp.exit_state)
         np.testing.assert_allclose(row["quantized_positions"], [(-0.5, 0.5)])
         self.assertAlmostEqual(row["score"], 1.0)
         self.assertEqual(row["episode_mismatches"], 1)
@@ -116,7 +116,7 @@ class ContinuousDeploymentTests(unittest.TestCase):
         cases = [((2, 2), 0), ((0, 2), 1), ((0, 0), 1), ((7, 7), 0), ((2, 1), 0)]
         for cell, action in cases:
             self.assertAlmostEqual(probabilities[mdp.cell_to_state(cell), action], 0.2336854404)
-        np.testing.assert_array_equal(probabilities[mdp.failure_state], 0)
+        np.testing.assert_array_equal(probabilities[mdp.exit_state], 0)
 
     def test_time_limit_counts_only_nonterminal_transitions(self):
         mdp = Robot2DMotionMDP(
@@ -150,19 +150,20 @@ class OnlineSettingsTests(unittest.TestCase):
             self.addCleanup(map_observer.stop)
             map_observer.start()
             proposed = main(
-                mdp=mdp, n_episodes=4, training_episodes=20, horizon=7, pilot_episodes=3,
+                mdp=mdp, n_deployment_episodes=4, training_episodes=20, horizon=7, pilot_episodes=3,
                 seed=87, shift_period=10, save_plots=False, verbose=False,
             )
             for index, method in enumerate(("nominal", "global"), 1):
                 other = main(
-                    mdp=mdp, method=method, n_episodes=2, training_episodes=10, horizon=7,
+                    mdp=mdp, method=method, n_deployment_episodes=2, training_episodes=10,
+                    horizon=7,
                     calibration_scores=proposed.initial_calibration_scores, pilot_episodes=0,
                     seed=87 + 100000 * index, shift_period=10,
                     save_plots=False, verbose=False,
                 )
                 other.run(2)
                 for expected, actual in zip(proposed.history, other.history):
-                    self.assertEqual(actual["true_support"], expected["true_support"])
+                    self.assertEqual(actual["C_star_k"], expected["C_star_k"])
                 self.assertFalse(other.pilot_scores)
                 filename = f"results_{method}_RNone_CNone_trial_1.pkl"
                 with (Path(directory) / "saved_results/online" / filename).open("rb") as file:
@@ -184,14 +185,14 @@ class OnlineSettingsTests(unittest.TestCase):
                 with self.subTest(method=method):
                     controller = main(
                         mdp=Robot2DMotionMDP(),
-                        method=method, n_episodes=2, training_episodes=10, horizon=5,
+                        method=method, n_deployment_episodes=2, training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20,
                         save_plots=False, verbose=False,
                     )
                     first, last = controller.history
                     count = first["episode_length"] + last["episode_length"]
                     self.assertEqual(last["transition_count"], count)
-                    self.assertAlmostEqual(last["R_next"], last["mismatch_count"] / count)
+                    self.assertAlmostEqual(last["R_hat_next"], last["mismatch_count"] / count)
                     self.assertEqual(controller.calibrator.n_updates, 2)
                     self.assertTrue(all(r["training"]["zero_initialized"]
                                         for r in controller.history))
@@ -199,10 +200,10 @@ class OnlineSettingsTests(unittest.TestCase):
                         self.assertEqual(last["R_used"], 0)
                         self.assertTrue(last["training_reused"])
                     else:
-                        self.assertAlmostEqual(last["R_used"], first["R_next"])
+                        self.assertAlmostEqual(last["R_used"], first["R_hat_next"])
                         self.assertFalse(last["training_reused"])
                     if method == "global":
-                        self.assertTrue(np.isposinf(last["planning_radius"]))
+                        self.assertTrue(np.isposinf(last["C_used"]))
                         self.assertEqual(controller.agent.C, np.inf)
 
     def test_fixed_parameters_and_ACP_update_order(self):
@@ -212,20 +213,21 @@ class OnlineSettingsTests(unittest.TestCase):
         ):
             fixed = main(
                 mdp=Robot2DMotionMDP(),
-                n_episodes=2, training_episodes=10, horizon=5, R=0.2, C=0.7,
+                n_deployment_episodes=2, training_episodes=10, horizon=5, R=0.2, C=0.7,
                 calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
             )
             self.assertTrue(all(row["R_used"] == 0.2 for row in fixed.history))
-            self.assertTrue(all(row["planning_radius"] == 0.7 for row in fixed.history))
-            self.assertEqual(fixed.calibrator.delta, 0.1)
+            self.assertTrue(all(row["C_used"] == 0.7 for row in fixed.history))
+            self.assertEqual(fixed.calibrator.delta_k, 0.1)
             adaptive = main(
                 mdp=Robot2DMotionMDP(),
-                n_episodes=2, training_episodes=10, horizon=5, calibration_scores=[0.1] * 20,
+                n_deployment_episodes=2, training_episodes=10, horizon=5,
+                calibration_scores=[0.1] * 20,
                 save_plots=False, verbose=False,
             )
-            self.assertEqual(adaptive.history[0]["conformal_radius"], 0.1)
+            self.assertEqual(adaptive.history[0]["C_hat"], 0.1)
             coverage = 1 - np.mean([row["miscoverage"] for row in adaptive.history])
-            change = adaptive.calibrator.delta - adaptive.calibrator.initial_delta
+            change = adaptive.calibrator.delta_k - adaptive.calibrator.delta_1
             self.assertAlmostEqual(coverage, 0.9 + change / (adaptive.calibrator.eta * 2))
 
     def test_controller_continuation_preserves_experiment_settings(self):
@@ -241,7 +243,7 @@ class OnlineSettingsTests(unittest.TestCase):
                 with self.subTest(setting=name):
                     controller = main(
                         mdp=Robot2DMotionMDP(),
-                        n_episodes=1, training_episodes=10, horizon=5,
+                        n_deployment_episodes=1, training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
                         **settings,
                     )
@@ -254,11 +256,11 @@ class OnlineSettingsTests(unittest.TestCase):
                     if name == "nominal":
                         self.assertIs(controller.agent, previous_agent)
                         self.assertEqual(record["R_used"], 0)
-                        self.assertEqual(record["planning_radius"], 0)
+                        self.assertEqual(record["C_used"], 0)
                     else:
                         self.assertIsNot(controller.agent, previous_agent)
                         expected_C = np.inf if name == "global" else 0.7
-                        self.assertEqual(record["planning_radius"], expected_C)
+                        self.assertEqual(record["C_used"], expected_C)
                     if name == "fixed":
                         self.assertEqual(record["R_used"], 0.2)
                         self.assertEqual(controller.calibrator.n_updates, 0)
@@ -273,13 +275,13 @@ class OnlineSettingsTests(unittest.TestCase):
             mdp = Robot2DMotionMDP()
             randomize_obstacles(mdp, np.random.default_rng(7))
             controller = main(
-                mdp=mdp, n_episodes=3, training_episodes=10, horizon=20,
+                mdp=mdp, n_deployment_episodes=3, training_episodes=10, horizon=20,
                 calibration_scores=[0.6] * 20, shift_period=10,
                 save_plots=True, verbose=False,
             )
             for row in controller.history:
                 self.assertNotIn("obstacles", row)
-                self.assertLessEqual(row["score"], row["true_support"])
+                self.assertLessEqual(row["score"], row["C_star_k"])
                 np.testing.assert_array_equal(row["mismatches"], row["deviations"] > 0)
                 np.testing.assert_allclose(
                     row["positions"][1:], row["nominal_positions"] + row["deviation_vectors"],
@@ -296,7 +298,7 @@ class OnlineSettingsTests(unittest.TestCase):
             output_dir = Path(directory) / "saved_results/online"
             with (output_dir / "results_proposed_RNone_CNone_trial_1.pkl").open("rb") as file:
                 saved = pickle.load(file)
-            self.assertEqual(saved["true_R"], 0.2)
+            self.assertEqual(saved["R_star"], 0.2)
             self.assertEqual(saved["shift_period"], 10)
             np.testing.assert_array_equal(saved["mdp"].obstacle_mask, mdp.obstacle_mask)
             self.assertEqual(np.count_nonzero(saved["mdp"].obstacle_mask), 10)
@@ -311,16 +313,16 @@ class OnlineSettingsTests(unittest.TestCase):
         )
         controller = ConformallyRobustController(
             mdp, horizon=5, training_episodes=100, calibration_scores=[0.1] * 20,
-            initial_R=0, seed=7,
+            R_hat_init=0, seed=7,
         )
         record = controller.run_episode()
         self.assertTrue(record["workspace_exit"])
         self.assertEqual(record["transition_count"], 1)
         self.assertEqual(record["episode_mismatches"], 1)
-        self.assertEqual(record["R_next"], 1)
+        self.assertEqual(record["R_hat_next"], 1)
         self.assertEqual(record["score"], 10)
         self.assertEqual(record["miscoverage"], 1)
-        np.testing.assert_array_equal(controller.Q[mdp.failure_state], 0)
+        np.testing.assert_array_equal(controller.Q[mdp.exit_state], 0)
 
 
 if __name__ == "__main__":

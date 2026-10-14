@@ -12,19 +12,20 @@ class ConformallyRobustController:
     Algorithm 2 starts Algorithm 1 from zero every episode; the nominal baseline
     reuses its policy when the environment stays fixed. The MDP supplies clone()
     and deploy_policy(). Only actual deployment transitions enter the mismatch
-    estimate; pilot calibration
-    does not. Episodes stop at a terminal condition, with horizon
-    acting as a step limit. R uses the total observed transition count tau_k.
+    estimate; pilot calibration does not. Episodes stop at a terminal condition,
+    with horizon acting as a step limit. R uses the observed transition count tau_k.
 
     R/C=None selects online estimation/calibration; numeric values hold them fixed.
     method='nominal' plans with R=C=0; method='global' plans with C=infinity.
+    R_hat is the current estimate and C_hat is the nonnegative ACP prediction.
+    R_used and C_used are the actual Algorithm 1 inputs after method overrides.
     episode_setup(controller, index) runs before each episode and returns metadata.
     Indices are zero-based online and negative for the initial pilot episodes.
     """
 
     def __init__(
         self, mdp, *, gamma=0.95, horizon=100, training_episodes=2000,
-        training_horizon=100, initial_R=0.1, target_failure=0.1, initial_failure=None,
+        training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
         eta=0.01, calibration_scores=None, calibration_window=100, pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, method="proposed", R=None, C=None,
@@ -32,7 +33,7 @@ class ConformallyRobustController:
     ):
         if method not in ("proposed", "nominal", "global"):
             raise ValueError("method must be 'proposed', 'nominal', or 'global'.")
-        Tabular_Agent._validate_uncertainty(initial_R if R is None else R, 0 if C is None else C)
+        Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
         for name, value in (
             ("horizon", horizon), ("training_episodes", training_episodes),
             ("training_horizon", training_horizon), ("pilot_episodes", pilot_episodes),
@@ -42,8 +43,8 @@ class ConformallyRobustController:
                 raise ValueError(f"{name} must be an integer of at least {minimum}.")
         if not np.isfinite(gamma) or not 0 <= gamma < 1:
             raise ValueError("gamma must be in [0, 1).")
-        if not np.isfinite(initial_R) or not 0 <= initial_R <= 1:
-            raise ValueError("initial_R must be in [0, 1].")
+        if not np.isfinite(R_hat_init) or not 0 <= R_hat_init <= 1:
+            raise ValueError("R_hat_init must be in [0, 1].")
         self.gamma = float(gamma)
         self.horizon = int(horizon)
         self.training_episodes = int(training_episodes)
@@ -55,7 +56,7 @@ class ConformallyRobustController:
         self.rng = np.random.default_rng(seed)
         self.training_env = mdp.clone(nominal=True, max_episode_steps=training_horizon)
         self.deployment_env = mdp.clone(max_episode_steps=horizon, seed=self._next_seed())
-        self.R_estimate = float(initial_R)
+        self.R_hat = float(R_hat_init)
         self.transition_count = 0
         self.mismatch_count = 0
         self.history = []
@@ -70,7 +71,7 @@ class ConformallyRobustController:
             "epsilon_lb": epsilon_lb, "epsilon_decay_rate": epsilon_decay_rate,
         }
         self.acp_options = {
-            "target_failure": target_failure, "initial_failure": initial_failure,
+            "delta": delta, "delta_1": delta_1,
             "eta": eta, "window_size": calibration_window,
         }
         # Validate calibration settings before any potentially expensive pilot run.
@@ -81,7 +82,7 @@ class ConformallyRobustController:
             self.initial_calibration_scores = list(self.calibrator.scores)
         elif self.pilot_episodes == 0:
             raise ValueError("Provide calibration_scores or request at least one pilot episode.")
-        self.target_failure = validated.target_failure
+        self.delta = validated.delta
 
     def _next_seed(self):
         return int(self.rng.integers(0, 2**32 - 1))
@@ -107,17 +108,21 @@ class ConformallyRobustController:
         settings = {}
         if self.episode_setup is not None:
             settings = self.episode_setup(self, len(self.history))
-        conformal_radius = self.calibrator.quantile() if self.fixed_C is None else self.fixed_C
-        planning_radius = self.calibrator.planning_radius(conformal_radius)
-        R_used = self.R_estimate if self.fixed_R is None else self.fixed_R
+        if self.fixed_C is None:
+            C_hat = self.calibrator.quantile()
+        else:
+            Tabular_Agent._validate_uncertainty(0.0, self.fixed_C)
+            C_hat = max(0.0, float(self.fixed_C))
+        C_used = C_hat
+        R_used = self.R_hat if self.fixed_R is None else self.fixed_R
         if self.method == "nominal":
-            R_used, planning_radius = 0.0, 0.0
+            R_used, C_used = 0.0, 0.0
         elif self.method == "global":
-            planning_radius = np.inf
+            C_used = np.inf
         reused = self.method == "nominal" and self.agent is not None
         if not reused:
             self.agent = Tabular_Agent(
-                self.training_env, R=R_used, C=planning_radius, seed=self._next_seed(),
+                self.training_env, R=R_used, C=C_used, seed=self._next_seed(),
                 **self.agent_options,
             )
             self.Q, self.policy = self.agent.robust_q_learning(
@@ -126,20 +131,20 @@ class ConformallyRobustController:
         record = self.deployment_env.deploy_policy(self.policy, self.gamma)
         self.transition_count += len(record["actions"])
         self.mismatch_count += record["episode_mismatches"]
-        self.R_estimate = self.mismatch_count / self.transition_count
+        self.R_hat = self.mismatch_count / self.transition_count
         if self.fixed_C is None:
-            update = self.calibrator.update(record["score"], predicted_radius=conformal_radius)
+            update = self.calibrator.update(record["score"], predicted_radius=C_hat)
         else:
             update = {
-                "miscoverage": int(record["score"] > conformal_radius),
-                "delta_before": self.calibrator.delta, "delta_after": self.calibrator.delta,
+                "miscoverage": int(record["score"] > C_hat),
+                "delta_k": self.calibrator.delta_k, "delta_next": self.calibrator.delta_k,
             }
             self.calibrator.scores.append(record["score"])
         record.update({
             "episode": len(self.history) + 1, "R_used": R_used,
-            "R_next": self.R_estimate, "conformal_radius": float(conformal_radius),
-            "planning_radius": float(planning_radius),
-            "planned_miscoverage": int(record["score"] > planning_radius), **update,
+            "R_hat_next": self.R_hat, "C_hat": float(C_hat),
+            "C_used": float(C_used),
+            "planned_miscoverage": int(record["score"] > C_used), **update,
             "transition_count": self.transition_count, "mismatch_count": self.mismatch_count,
             "training": self.agent.training_diagnostics.copy(), "training_reused": reused,
         })
@@ -147,17 +152,17 @@ class ConformallyRobustController:
         self.history.append(record)
         return record
 
-    def run(self, n_episodes, *, verbose=False):
-        if not isinstance(n_episodes, (int, np.integer)) or n_episodes < 1:
-            raise ValueError("n_episodes must be a positive integer.")
+    def run(self, n_deployment_episodes, *, verbose=False):
+        if not isinstance(n_deployment_episodes, (int, np.integer)) or n_deployment_episodes < 1:
+            raise ValueError("n_deployment_episodes must be a positive integer.")
         records = []
-        for _ in range(n_episodes):
+        for _ in range(n_deployment_episodes):
             record = self.run_episode()
             records.append(record)
             if verbose:
                 print(
                     f"{self.method}, episode {record['episode']}: "
-                    f"R={record['R_used']:.3f}, C={record['planning_radius']:.3f}, "
+                    f"R={record['R_used']:.3f}, C={record['C_used']:.3f}, "
                     f"steps={record['episode_length']}, goal={record['goal_reached']}",
                 )
         return records

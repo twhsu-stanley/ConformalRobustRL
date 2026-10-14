@@ -12,25 +12,35 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 class ACPTests(unittest.TestCase):
     def test_order_statistic_uses_N_plus_one_without_interpolation(self):
-        calibration = ACP([0, 1, 2, 3], target_failure=0.5)
+        calibration = ACP([0, 1, 2, 3], delta=0.5)
         self.assertEqual(calibration.quantile(), 2)
 
     def test_quantile_precedes_append_and_update_is_unclipped(self):
-        calibration = ACP([0, 1, 2, 3], target_failure=0.5, eta=0.1)
+        calibration = ACP([0, 1, 2, 3], delta=0.5, eta=0.1)
         prediction = calibration.quantile()
         update = calibration.update(9, prediction)
         self.assertEqual(update["miscoverage"], 1)
-        self.assertAlmostEqual(calibration.delta, 0.45)
+        self.assertAlmostEqual(calibration.delta_k, 0.45)
         self.assertEqual(calibration.scores[-1], 9)
 
-    def test_extended_quantile_tails_and_zero_radius_fallback(self):
-        calibration = ACP([0], target_failure=0.1, eta=0.2)
+    def test_quantile_tails_return_nonnegative_planning_radii(self):
+        calibration = ACP([0], delta=0.1, eta=0.2)
         self.assertEqual(calibration.quantile(), np.inf)
-        calibration.delta = 1.1
-        self.assertEqual(calibration.quantile(), -np.inf)
-        self.assertEqual(calibration.planning_radius(calibration.quantile()), 0)
-        self.assertEqual(calibration.update(0)["miscoverage"], 1)
-        self.assertAlmostEqual(calibration.delta, 0.92)
+        calibration.delta_k = 1.1
+        self.assertEqual(calibration.quantile(), 0)
+        self.assertEqual(calibration.update(0)["miscoverage"], 0)
+        self.assertAlmostEqual(calibration.delta_k, 1.12)
+        self.assertEqual(calibration.update(0.1)["miscoverage"], 1)
+        self.assertAlmostEqual(calibration.delta_k, 0.94)
+
+    def test_target_initial_and_adaptive_delta_are_distinct(self):
+        calibration = ACP([0.1] * 10, delta=0.1, delta_1=0.4, eta=0.2)
+        update = calibration.update(0.2)
+        self.assertEqual(calibration.delta, 0.1)
+        self.assertEqual(calibration.delta_1, 0.4)
+        self.assertEqual(update["delta_k"], 0.4)
+        self.assertAlmostEqual(update["delta_next"], 0.22)
+        self.assertAlmostEqual(calibration.delta_k, 0.22)
 
     def test_deque_window_discards_old_scores(self):
         calibration = ACP([0, 1, 2], window_size=2)
@@ -39,12 +49,12 @@ class ACPTests(unittest.TestCase):
         self.assertEqual(list(calibration.scores), [2, 3])
 
     def test_telescoping_ACP_identity(self):
-        calibration = ACP([0.2] * 10, target_failure=0.2, eta=0.1)
+        calibration = ACP([0.2] * 10, delta=0.2, eta=0.1)
         misses = 0
         for score in (0.1, 0.8, 0.3, 0, 0.9, 0.2):
             misses += calibration.update(score)["miscoverage"]
-        expected = calibration.initial_delta + calibration.eta * (6 * 0.2 - misses)
-        self.assertAlmostEqual(calibration.delta, expected)
+        expected = calibration.delta_1 + calibration.eta * (6 * 0.2 - misses)
+        self.assertAlmostEqual(calibration.delta_k, expected)
 
 
 class ControllerTests(unittest.TestCase):
@@ -54,8 +64,8 @@ class ControllerTests(unittest.TestCase):
             noise_sampler=lambda position, rng: np.array((0.2, 0)),
         )
         options = dict(
-            horizon=4, training_episodes=100, training_horizon=10, initial_R=0.2,
-            calibration_scores=[0.1] * 10, target_failure=0.2, eta=0.1, seed=5,
+            horizon=4, training_episodes=100, training_horizon=10, R_hat_init=0.2,
+            calibration_scores=[0.1] * 10, delta=0.2, eta=0.1, seed=5,
         )
         options.update(kwargs)
         return ConformallyRobustController(mdp, **options)
@@ -66,10 +76,10 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(controller.transition_count, record["episode_length"])
         self.assertEqual(controller.mismatch_count, np.sum(record["mismatches"]))
         self.assertAlmostEqual(record["score"], max(record["deviations"]))
-        self.assertAlmostEqual(record["R_next"], np.mean(record["mismatches"]))
-        self.assertAlmostEqual(record["conformal_radius"], 0.1)
+        self.assertAlmostEqual(record["R_hat_next"], np.mean(record["mismatches"]))
+        self.assertAlmostEqual(record["C_hat"], 0.1)
         self.assertEqual(record["miscoverage"], int(record["score"] > 0.1))
-        self.assertAlmostEqual(record["delta_after"], 0.2 + 0.1 * (0.2 - record["miscoverage"]))
+        self.assertAlmostEqual(record["delta_next"], 0.2 + 0.1 * (0.2 - record["miscoverage"]))
         self.assertEqual(record["positions"].shape, (record["episode_length"] + 1, 2))
         self.assertLessEqual(record["episode_length"], controller.horizon)
         self.assertTrue(record["training"]["zero_initialized"])
@@ -84,12 +94,12 @@ class ControllerTests(unittest.TestCase):
         second = controller.run_episode()
         self.assertIsNot(first_agent, controller.agent)
         self.assertEqual(controller.agent.evaluation_return[0], 0)
-        self.assertAlmostEqual(second["R_used"], first["R_next"])
+        self.assertAlmostEqual(second["R_used"], first["R_hat_next"])
         count = first["episode_length"] + second["episode_length"]
         self.assertEqual(second["transition_count"], count)
         self.assertEqual(second["mismatch_count"],
                          first["episode_mismatches"] + second["episode_mismatches"])
-        self.assertAlmostEqual(second["R_next"], second["mismatch_count"] / count)
+        self.assertAlmostEqual(second["R_hat_next"], second["mismatch_count"] / count)
 
     def test_variable_episodes_weight_R_by_transitions_and_update_ACP_once_each(self):
         deviations = iter(([0.2, 0], [0.1, 0], [-2.0, 0], [0, 0], [0, 0.6]))
@@ -99,7 +109,7 @@ class ControllerTests(unittest.TestCase):
         )
         controller = ConformallyRobustController(
             mdp, horizon=6, training_episodes=1, calibration_scores=[0.1] * 10,
-            target_failure=0.2, eta=0.1, initial_R=0.2,
+            delta=0.2, eta=0.1, R_hat_init=0.2,
         )
         policy = np.array([0, 2, 0, 0, 0])
         with patch("conformally_robust_controller.Tabular_Agent.robust_q_learning",
@@ -110,13 +120,13 @@ class ControllerTests(unittest.TestCase):
         self.assertAlmostEqual(first["score"], 0.2)
         self.assertEqual(second["score"], 2)
         self.assertAlmostEqual(third["score"], 0.6)
-        self.assertEqual(first["R_next"], 0)
-        self.assertAlmostEqual(second["R_next"], 1 / 3)
-        self.assertEqual(third["R_next"], 0.4)
-        self.assertEqual(second["R_used"], first["R_next"])
-        self.assertEqual(third["R_used"], second["R_next"])
+        self.assertEqual(first["R_hat_next"], 0)
+        self.assertAlmostEqual(second["R_hat_next"], 1 / 3)
+        self.assertEqual(third["R_hat_next"], 0.4)
+        self.assertEqual(second["R_used"], first["R_hat_next"])
+        self.assertEqual(third["R_used"], second["R_hat_next"])
         self.assertEqual(controller.calibrator.n_updates, 3)
-        self.assertAlmostEqual(controller.calibrator.delta, 0.06)
+        self.assertAlmostEqual(controller.calibrator.delta_k, 0.06)
 
     def test_pilot_scores_do_not_enter_R_counts(self):
         controller = self.controller(calibration_scores=None, pilot_episodes=3)
@@ -127,22 +137,40 @@ class ControllerTests(unittest.TestCase):
         record = controller.run_episode()
         self.assertEqual(controller.transition_count, record["episode_length"])
 
-    def test_zero_noise_stops_at_goal_and_retains_empty_predictions(self):
+    def test_zero_noise_stops_at_goal_with_zero_radius_prediction(self):
         mdp = Robot2DMotionMDP(x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0)
         controller = ConformallyRobustController(
             mdp, horizon=6, training_episodes=200, calibration_scores=[0] * 5,
-            initial_R=0, target_failure=0.2, eta=0.1, seed=2,
+            R_hat_init=0, delta=0.2, eta=0.1, seed=2,
         )
-        controller.calibrator.delta = 1.1
+        controller.calibrator.delta_k = 1.1
         record = controller.run_episode()
         self.assertTrue(record["goal_reached"])
         self.assertEqual(record["episode_length"], 2)
         self.assertFalse(np.any(record["states"][:-1] == mdp.goal_state))
         self.assertEqual(record["transition_count"], 2)
-        self.assertEqual(record["R_next"], 0)
+        self.assertEqual(record["R_hat_next"], 0)
         self.assertEqual(record["score"], 0)
-        self.assertEqual(record["miscoverage"], 1)
+        self.assertEqual(record["C_hat"], 0)
+        self.assertEqual(record["C_used"], 0)
+        self.assertEqual(record["miscoverage"], 0)
         self.assertEqual(record["planned_miscoverage"], 0)
+
+    def test_fixed_radius_is_validated_and_passed_directly_to_training(self):
+        for C in (0.0, 1.0, np.inf):
+            with self.subTest(C=C):
+                controller = self.controller(C=C, training_episodes=10)
+                record = controller.run_episode()
+                self.assertEqual(record["C_hat"], C)
+                self.assertEqual(record["C_used"], C)
+                self.assertEqual(controller.agent.C, C)
+                self.assertEqual(controller.calibrator.n_updates, 0)
+        for C in (np.nan, -0.1):
+            with self.subTest(C=C):
+                controller = self.controller(C=0.0, training_episodes=10)
+                controller.fixed_C = C
+                with self.assertRaises(ValueError):
+                    controller.run_episode()
 
     def test_seeded_controllers_repeat_the_same_run(self):
         mdp = Robot2DMotionMDP(
