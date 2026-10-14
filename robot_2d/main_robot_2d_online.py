@@ -121,7 +121,7 @@ if __name__ == "__main__":
             controller = main(
                 mdp=mdp, method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
                 n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
-                eta=0.1, pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
+                eta=0.1, calibration_window=200, pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
                 R_star=R_star, shift_period=shift_period,
             )
             shared_scores = controller.initial_calibration_scores
