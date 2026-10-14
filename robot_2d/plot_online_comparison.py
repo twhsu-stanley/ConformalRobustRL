@@ -68,12 +68,10 @@ def mismatch_probabilities(mdp):
     return np.clip(result, 0, 1)
 
 
-def plot_R(runs, delta_R=0.05):
-    """Compare cumulative R estimates with R-star and Lemma 5 at observed tau_k."""
-    if not 0 < delta_R < 1:
-        raise ValueError("delta_R must be in (0, 1).")
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4), constrained_layout=True)
-    estimates, probabilities, transition_counts = [], [], []
+def plot_R(runs):
+    """Compare cumulative R estimates with the common true R-star."""
+    fig, axis = plt.subplots(figsize=(6, 4), constrained_layout=True)
+    estimates, probabilities = [], []
     for run in runs:
         mdp = run["mdp"]
         probability = run.get("R_star")
@@ -82,21 +80,11 @@ def plot_R(runs, delta_R=0.05):
         probabilities.append(probability)
         estimate = np.asarray([row["R_hat_next"] for row in run["history"]])
         estimates.append(estimate)
-        counts = np.asarray([row["transition_count"] for row in run["history"]])
-        transition_counts.extend(counts)
-        axes[0].plot(np.arange(1, len(estimate) + 1), estimate, color="C0", alpha=0.25)
-        label = "Observed absolute error" if len(estimates) == 1 else None
-        axes[1].loglog(counts, np.maximum(np.abs(estimate - probability), 1e-12),
-                       color="C0", alpha=0.4, label=label)
+        axis.plot(np.arange(1, len(estimate) + 1), estimate, color="C0", alpha=0.25)
     episodes = np.arange(1, len(estimates[0]) + 1)
-    axes[0].plot(episodes, np.mean(estimates, axis=0), label="Estimated R")
-    axes[0].axhline(np.mean(probabilities), color="black", linestyle=":", label="True R*")
-    counts = np.unique(transition_counts).astype(float)
-    bound = np.sqrt(np.log(2 * counts * (counts + 1) / delta_R) / (2 * counts))
-    axes[1].loglog(counts, bound, "k--", label=rf"Lemma 5 bound ($\delta_R={delta_R:g}$)")
-    axes[0].set(title="R estimation", xlabel="Episode", ylabel="Probability")
-    axes[1].set(title="Error around true R*", xlabel="Transitions", ylabel="Absolute error")
-    fig.suptitle("Variable episode lengths; terminal transitions included")
+    axis.plot(episodes, np.mean(estimates, axis=0), label="Estimated R")
+    axis.axhline(np.mean(probabilities), color="black", linestyle=":", label="True R*")
+    axis.set(title="R estimation", xlabel="Deployment episode k", ylabel="Probability")
     return fig
 
 
