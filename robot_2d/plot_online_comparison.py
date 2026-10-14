@@ -14,6 +14,14 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from acp import ACP
+from robot_2d.utils import plot_robot_map
+
+
+METHOD_LABELS = {
+    "proposed": "Proposed", "nominal": "Nominal",
+    "R_contamination_0.1": "R-contamination (R=0.1)",
+    "R_contamination_0.3": "R-contamination (R=0.3)",
+}
 
 
 def disk_rectangle_area(radius, xlo, xhi, ylo, yhi):
@@ -166,22 +174,22 @@ def plot_performance(runs):
     """Compare the rewards and outcomes already recorded during online deployment."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
     methods = list(dict.fromkeys(run["method"] for run in runs))
-    labels = {"proposed": "Proposed", "nominal": "Nominal", "global": "Global R-contamination"}
     outcomes = {"goal_reached": "Goal", "collision": "Obstacle", "workspace_exit": "Exit",
                 "timeout": "Step limit"}
     width = 0.8 / len(methods)
     for index, method in enumerate(methods):
         color = f"C{index}"
+        label = METHOD_LABELS[method]
         histories = [run["history"] for run in runs if run["method"] == method]
         returns = np.array([[row["discounted_return"] for row in history] for history in histories])
         episodes = np.arange(1, returns.shape[1] + 1)
         averages = np.cumsum(returns, axis=1) / episodes
         axes[0].plot(episodes, averages.T, color=color, alpha=0.2)
-        axes[0].plot(episodes, np.mean(averages, axis=0), color=color, label=labels[method])
+        axes[0].plot(episodes, np.mean(averages, axis=0), color=color, label=label)
         rates = np.asarray([[np.mean([row[key] for row in history]) for key in outcomes]
                             for history in histories])
         positions = np.arange(len(outcomes)) + (index - (len(methods) - 1) / 2) * width
-        axes[1].bar(positions, np.mean(rates, axis=0), width, color=color, label=labels[method])
+        axes[1].bar(positions, np.mean(rates, axis=0), width, color=color, label=label)
         axes[1].plot(positions, rates.T, "k.", alpha=0.6)
     axes[0].set(title="Cumulative mean discounted reward", xlabel="Online episode", ylabel="Reward")
     axes[1].set(title="Outcomes across online episodes", ylabel="Episode fraction", ylim=(0, 1.02))
@@ -190,11 +198,36 @@ def plot_performance(runs):
     return fig
 
 
+def plot_trajectories(run):
+    """Overlay every recorded deployment episode on its trial's fixed obstacle map."""
+    mdp, history = run["mdp"], run["history"]
+    if not history:
+        raise ValueError("At least one deployment episode is required for plotting.")
+    fig, axis = plt.subplots(figsize=(8, 7), constrained_layout=True)
+    plot_robot_map(mdp, axis)
+    cmap = plt.get_cmap("viridis")
+    norm = plt.Normalize(vmin=0.5, vmax=len(history) + 0.5)
+    trajectories = [np.asarray(row["positions"]) for row in history]
+    for episode, trajectory in enumerate(trajectories, 1):
+        axis.plot(trajectory[:, 0], trajectory[:, 1], color=cmap(norm(episode)),
+                  linewidth=1, alpha=0.5, marker=".", markersize=3)
+    positions = np.concatenate(trajectories)
+    lo = np.minimum(positions.min(axis=0), 0) - 0.2 * mdp.cell_widths
+    hi = np.maximum(positions.max(axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
+    axis.set(xlim=(lo[0], hi[0]), ylim=(lo[1], hi[1]))
+    ticks = np.unique(np.linspace(1, len(history), min(6, len(history)), dtype=int))
+    fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
+                 ticks=ticks, label="Deployment episode")
+    axis.set_title(f"{METHOD_LABELS[run['method']]}, trial {run['trial']}: "
+                   f"{len(history)} deployment trajectories")
+    return fig
+
+
 def plot_comparison(window=10, delta_R=0.05):
-    """Read the fixed online result filenames and plot R, ACP, and deployed performance."""
+    """Read saved runs and plot R, ACP, performance, and all deployment trajectories."""
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     runs = []
-    for method in ("proposed", "nominal", "global"):
+    for method in METHOD_LABELS:
         for filename in sorted(output_dir.glob(f"results_{method}_RNone_CNone_trial_*.pkl")):
             with filename.open("rb") as file:
                 runs.append(pickle.load(file))
@@ -210,6 +243,13 @@ def plot_comparison(window=10, delta_R=0.05):
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend(fontsize=8)
+        for extension in ("png", "pdf"):
+            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
+        plt.close(fig)
+    for run in runs:
+        fig = plot_trajectories(run)
+        name = (f"trajectories_{run['method']}_R{run['fixed_R']}_C{run['fixed_C']}"
+                f"_trial_{run['trial']}")
         for extension in ("png", "pdf"):
             fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)

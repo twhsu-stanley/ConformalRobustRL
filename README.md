@@ -25,7 +25,7 @@ python -m robot_2d.main_robot_2d_online
 python -m robot_2d.plot_online_comparison
 ```
 
-The settings at the bottom of `robot_2d/main_robot_2d_online.py` run three methods
+The settings at the bottom of `robot_2d/main_robot_2d_online.py` run four methods
 for seeds `(87,)`, with 100 outer episodes, 4,000 inner training episodes per
 training call and 100 pilot episodes.
 All online results and figures go to `robot_2d/saved_results/online/`.
@@ -68,19 +68,20 @@ These continuation calls do not rewrite the files previously saved by `main()`.
 | --- | --- | --- | --- |
 | `proposed` | Cumulative mismatch estimate | Pre-episode ACP radius | Fresh zero Q-table each episode |
 | `nominal` | 0 | 0 | Train once per trial and reuse the policy |
-| `global` | Its own cumulative mismatch estimate | Positive infinity | Fresh zero Q-table each episode |
+| `R_contamination_0.1` | Fixed at 0.1 | Positive infinity | Fresh zero Q-table each episode |
+| `R_contamination_0.3` | Fixed at 0.3 | Positive infinity | Fresh zero Q-table each episode |
 
-The global method implements the globally supported R-contamination comparison
+The two R-contamination methods implement the globally supported comparison
 associated with [Wang and Zou, NeurIPS 2021](https://proceedings.neurips.cc/paper/2021/file/3a4496776767aaa99f9804d0905fe584-Paper.pdf).
 Using `np.inf` includes all 101 next states on the configured 10-by-10 grid:
-100 grid states and the workspace-failure state.
-Our comparison supplies this baseline with the same estimation procedure for R;
-that online estimator is part of our experimental protocol.
+100 grid states and the exit state. Their planning R stays fixed at 0.1 or 0.3
+throughout deployment. Observed mismatch estimates are still recorded as diagnostics.
 
 ```python
 controller = main(mdp=mdp, method='proposed', R=None, C=None, save_plots=False)
 controller = main(mdp=mdp, method='nominal', save_plots=False)
-controller = main(mdp=mdp, method='global', save_plots=False)
+controller = main(mdp=mdp, method='R_contamination_0.1', save_plots=False)
+controller = main(mdp=mdp, method='R_contamination_0.3', save_plots=False)
 controller = main(mdp=mdp, method='proposed', R=0.2, C=0.7, save_plots=False)
 ```
 
@@ -88,8 +89,9 @@ controller = main(mdp=mdp, method='proposed', R=0.2, C=0.7, save_plots=False)
 parameter fixed while mismatch observations continue to be recorded. `C=None`
 uses ACP; numeric C holds the radius fixed and disables the adaptive failure
 parameter update while retaining observed scores. Method overrides take priority:
-nominal planning always uses R=C=0, and global planning always uses C=infinity.
-With `C=None`, ACP diagnostics are still collected for the nominal and global methods.
+nominal planning always uses R=C=0; the two R-contamination methods always use
+their named fixed R and C=infinity, regardless of supplied R/C arguments.
+With `C=None`, ACP diagnostics are still collected for all baseline methods.
 
 | Argument to `main()` | Default | Meaning |
 | --- | --- | --- |
@@ -112,7 +114,7 @@ With `C=None`, ACP diagnostics are still collected for the nominal and global me
 | `save_plots` | `True` | Save the two single-run figures |
 | `verbose` | `True` | Print episode progress and the saved path |
 
-The script entry point runs all three methods for seeds `(87,)`.
+The script entry point runs all four methods for seeds `(87,)`.
 It calls `main()` once per method and trial;
 each call saves its own file. The script explicitly sets 100 pilots; calling `main()`
 without that override uses the 20-pilot function default.
@@ -301,7 +303,8 @@ and unvisited pairs when selecting a common training budget across methods.
 ## Figures and what they establish
 
 The separate `plot_online_comparison.py` reads the per-run files from
-`saved_results/online/` and writes the R, ACP, and online policy comparison figures there.
+`saved_results/online/` and writes the R, ACP, online policy comparison, and trajectory
+figures there.
 Its paths are fixed relative to the script. It does not run the robot or retrain policies.
 
 ### R estimation: `r_estimation`
@@ -382,8 +385,8 @@ improved ACP performance must be demonstrated by the data.
 ### Online policy comparison: `policy_comparison`
 
 The comparison uses the deployment episodes already recorded by Algorithm 2 and
-the nominal and global baselines. The first panel shows cumulative mean observed
-discounted reward, `G_k = sum_t gamma^t r(s_t,a_t)`, versus the online episode index.
+the nominal and two fixed-R contamination baselines. The first panel shows cumulative
+mean observed discounted reward, `G_k = sum_t gamma^t r(s_t,a_t)`, versus the online episode index.
 Thin curves show individual trials; solid curves show their mean.
 The second panel compares the fractions of those same episodes ending at the goal,
 an obstacle, outside the workspace, or at the step limit. Bars show trial means
@@ -393,6 +396,12 @@ Each episode supplies one observation of its current deployed policy. The figure
 describes performance during online adaptation. It does not estimate Theorem 3's
 regret, which compares robust optimal values at estimated and true R with the same C.
 The comparison reads saved histories without running additional robot episodes.
+
+For each trial and method, the plotter also overlays all `n_deployment_episodes`
+trajectories on the saved obstacle map, marking the start and goal. Colors indicate
+the deployment episode number. Each trajectory connects its recorded continuous
+positions through its final landing; workspace exits remain visible outside the grid.
+These figures are saved as `trajectories_{method}_R{R}_C{C}_trial_{trial}.png` and `.pdf`.
 
 The R and ACP figures use runs labeled `proposed`.
 Single-run `main(save_plots=True)` saves `online_uncertainty_{test}.png` and
@@ -443,12 +452,13 @@ in `results_{method}_R{R}_C{C}_trial_{trial}.pkl`. For example:
 
 - `results_proposed_RNone_CNone_trial_1.pkl`: online R estimation and ACP.
 - `results_nominal_RNone_CNone_trial_1.pkl`: nominal baseline.
-- `results_global_RNone_CNone_trial_1.pkl`: global R-contamination baseline.
+- `results_R_contamination_0.1_RNone_CNone_trial_1.pkl`: fixed-R=0.1 contamination baseline.
+- `results_R_contamination_0.3_RNone_CNone_trial_1.pkl`: fixed-R=0.3 contamination baseline.
 - `results_proposed_R0.2_C0.7_trial_1.pkl`: fixed R/C experiment.
 
 `None` in the filename denotes an unspecified planning parameter; method overrides
-still determine nominal and global planning. The comparison plotter uses the fixed
-pattern `results_{method}_RNone_CNone_trial_*.pkl` for each of the three methods,
+still determine nominal and R-contamination planning. The comparison plotter uses the fixed
+pattern `results_{method}_RNone_CNone_trial_*.pkl` for each of the four methods,
 including all matching trials. Edit those patterns in the plotter to select other tests.
 
 Each run record contains settings, the configured MDP, initial and pilot scores,
@@ -467,7 +477,8 @@ Trajectory plots connect these successive positions directly.
 
 Single-run figures use the same method, R/C, and trial suffix as the results file.
 Comparison figures are `r_estimation`, `acp_calibration`, and `policy_comparison`,
-each in PNG and PDF format. These figures share the same folder as the result files.
+plus one `trajectories_{method}_R{R}_C{C}_trial_{trial}` figure per loaded run.
+Each is saved in PNG and PDF format in the same folder as the result files.
 
 ```python
 import pickle

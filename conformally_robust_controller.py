@@ -16,7 +16,8 @@ class ConformallyRobustController:
     with horizon acting as a step limit. R uses the observed transition count tau_k.
 
     R/C=None selects online estimation/calibration; numeric values hold them fixed.
-    method='nominal' plans with R=C=0; method='global' plans with C=infinity.
+    method='nominal' plans with R=C=0. The R-contamination baselines fix R at
+    0.1 or 0.3 and use C=infinity.
     R_hat is the current estimate and C_hat is the nonnegative ACP prediction.
     R_used and C_used are the actual Algorithm 1 inputs after method overrides.
     episode_setup(controller, index) runs before each episode and returns metadata.
@@ -31,8 +32,8 @@ class ConformallyRobustController:
         epsilon_decay_rate=0.995, seed=None, method="proposed", R=None, C=None,
         episode_setup=None,
     ):
-        if method not in ("proposed", "nominal", "global"):
-            raise ValueError("method must be 'proposed', 'nominal', or 'global'.")
+        if method not in ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.3"):
+            raise ValueError(f"Unknown method: {method}.")
         Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
         for name, value in (
             ("horizon", horizon), ("training_episodes", training_episodes),
@@ -117,8 +118,10 @@ class ConformallyRobustController:
         R_used = self.R_hat if self.fixed_R is None else self.fixed_R
         if self.method == "nominal":
             R_used, C_used = 0.0, 0.0
-        elif self.method == "global":
-            C_used = np.inf
+        elif self.method == "R_contamination_0.1":
+            R_used, C_used = 0.1, np.inf
+        elif self.method == "R_contamination_0.3":
+            R_used, C_used = 0.3, np.inf
         reused = self.method == "nominal" and self.agent is not None
         if not reused:
             self.agent = Tabular_Agent(

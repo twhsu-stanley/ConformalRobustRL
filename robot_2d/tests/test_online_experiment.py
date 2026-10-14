@@ -153,7 +153,8 @@ class OnlineSettingsTests(unittest.TestCase):
                 mdp=mdp, n_deployment_episodes=4, training_episodes=20, horizon=7, pilot_episodes=3,
                 seed=87, shift_period=10, save_plots=False, verbose=False,
             )
-            for index, method in enumerate(("nominal", "global"), 1):
+            methods = ("nominal", "R_contamination_0.1", "R_contamination_0.3")
+            for index, method in enumerate(methods, 1):
                 other = main(
                     mdp=mdp, method=method, n_deployment_episodes=2, training_episodes=10,
                     horizon=7,
@@ -171,7 +172,7 @@ class OnlineSettingsTests(unittest.TestCase):
                 np.testing.assert_array_equal(saved["mdp"].obstacle_mask, trial_map)
                 self.assertEqual(saved["seed"], 87 + 100000 * index)
             self.assertEqual(len(proposed.pilot_scores), 3)
-            self.assertEqual(len(observed_maps), 15)
+            self.assertEqual(len(observed_maps), 19)
             for observed in observed_maps:
                 np.testing.assert_array_equal(observed, trial_map)
             np.testing.assert_array_equal(mdp.obstacle_mask, trial_map)
@@ -181,12 +182,14 @@ class OnlineSettingsTests(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix="robot_online_settings_") as directory,
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
-            for method in ("proposed", "nominal", "global"):
+            methods = {"proposed": None, "nominal": 0.0,
+                       "R_contamination_0.1": 0.1, "R_contamination_0.3": 0.3}
+            for method, expected_R in methods.items():
                 with self.subTest(method=method):
                     controller = main(
                         mdp=Robot2DMotionMDP(),
                         method=method, n_deployment_episodes=2, training_episodes=10, horizon=5,
-                        calibration_scores=[0.1] * 20,
+                        calibration_scores=[0.1] * 20, R_hat_init=0.8,
                         save_plots=False, verbose=False,
                     )
                     first, last = controller.history
@@ -199,12 +202,16 @@ class OnlineSettingsTests(unittest.TestCase):
                     if method == "nominal":
                         self.assertEqual(last["R_used"], 0)
                         self.assertTrue(last["training_reused"])
-                    else:
+                    elif method == "proposed":
                         self.assertAlmostEqual(last["R_used"], first["R_hat_next"])
                         self.assertFalse(last["training_reused"])
-                    if method == "global":
-                        self.assertTrue(np.isposinf(last["C_used"]))
+                    else:
+                        for row in controller.history:
+                            self.assertEqual(row["R_used"], expected_R)
+                            self.assertEqual(row["C_used"], np.inf)
+                        self.assertEqual(controller.agent.R, expected_R)
                         self.assertEqual(controller.agent.C, np.inf)
+                        self.assertFalse(last["training_reused"])
 
     def test_fixed_parameters_and_ACP_update_order(self):
         with (
@@ -232,7 +239,9 @@ class OnlineSettingsTests(unittest.TestCase):
 
     def test_controller_continuation_preserves_experiment_settings(self):
         cases = {
-            "nominal": dict(method="nominal"), "global": dict(method="global"),
+            "nominal": dict(method="nominal"),
+            "R_contamination_0.1": dict(method="R_contamination_0.1"),
+            "R_contamination_0.3": dict(method="R_contamination_0.3"),
             "fixed": dict(R=0.2, C=0.7),
         }
         with (
@@ -259,8 +268,13 @@ class OnlineSettingsTests(unittest.TestCase):
                         self.assertEqual(record["C_used"], 0)
                     else:
                         self.assertIsNot(controller.agent, previous_agent)
-                        expected_C = np.inf if name == "global" else 0.7
+                        expected_C = 0.7 if name == "fixed" else np.inf
                         self.assertEqual(record["C_used"], expected_C)
+                        expected_R = {"fixed": 0.2, "R_contamination_0.1": 0.1,
+                                      "R_contamination_0.3": 0.3}[name]
+                        self.assertEqual(record["R_used"], expected_R)
+                        self.assertEqual(controller.agent.R, expected_R)
+                        self.assertEqual(controller.agent.C, expected_C)
                     if name == "fixed":
                         self.assertEqual(record["R_used"], 0.2)
                         self.assertEqual(controller.calibrator.n_updates, 0)

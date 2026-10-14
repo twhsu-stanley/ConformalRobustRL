@@ -1,4 +1,4 @@
-"""Run Algorithm 2 or its nominal/global baselines, then save the observations."""
+"""Run Algorithm 2 or its nominal/R-contamination baselines, then save the observations."""
 
 import pickle
 import sys
@@ -24,7 +24,8 @@ def main(
 ):
     """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
 
-    method='nominal' plans with R=0; method='global' plans with C=infinity.
+    method='nominal' plans with R=C=0. Methods 'R_contamination_0.1' and
+    'R_contamination_0.3' fix R_used at 0.1 and 0.3, respectively, with C_used=infinity.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
     The supplied obstacle map stays fixed throughout the run. Each episode has
     a fixed disturbance law whose support bound varies slowly within [0.5, 2.0],
@@ -105,13 +106,13 @@ if __name__ == "__main__":
         start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.01, goal_reward=1.0,
     )
 
-    seeds = (87,)
-    methods = ("proposed", "nominal", "global")
-    n_deployment_episodes = 100
+    seeds = (67,)
+    methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.3")
+    n_deployment_episodes = 80
     training_episodes = 4000
     pilot_episodes = 100
     R_star = 0.2
-    shift_period = 100
+    shift_period = 40
     for trial, seed in enumerate(seeds, 1):
         mdp.set_obstacles([])
         randomize_obstacles(mdp, np.random.default_rng(seed))

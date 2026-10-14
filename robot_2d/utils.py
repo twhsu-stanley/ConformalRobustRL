@@ -4,6 +4,29 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def plot_robot_map(mdp, axis):
+    """Draw the physical grid, obstacles, start, and goal on an existing axis."""
+    for state in range(mdp.n_grid_states):
+        ix, iy = mdp.state_to_cell(state)
+        color = "0.25" if mdp.obstacle_mask[iy, ix] else "none"
+        if state == mdp.start_state:
+            color = "lightskyblue"
+        elif state == mdp.goal_state:
+            color = "lightgreen"
+        rectangle = plt.Rectangle(
+            (ix * mdp.cell_widths[0], iy * mdp.cell_widths[1]), *mdp.cell_widths,
+            facecolor=color, edgecolor="0.6", linewidth=0.7,
+        )
+        axis.add_patch(rectangle)
+    axis.set(xlim=(0, mdp.bounds[0]), ylim=(0, mdp.bounds[1]), xlabel="x", ylabel="y",
+             aspect="equal")
+    axis.set_xticks(np.linspace(0, mdp.bounds[0], mdp.nx + 1))
+    axis.set_yticks(np.linspace(0, mdp.bounds[1], mdp.ny + 1))
+    for state, label in ((mdp.start_state, "S"), (mdp.goal_state, "G")):
+        x, y = mdp.coordinates(state)
+        axis.text(x, y, label, ha="center", va="center", weight="bold")
+
+
 def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     """Plot values, direction commands, and an optional continuous trajectory."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
@@ -12,24 +35,7 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     image = axes[0].imshow(values, origin="lower", extent=extent, cmap="YlGnBu")
     fig.colorbar(image, ax=axes[0], label="Learned robust value")
     for axis in axes:
-        for state in range(mdp.n_grid_states):
-            ix, iy = mdp.state_to_cell(state)
-            color = "0.25" if mdp.obstacle_mask[iy, ix] else "none"
-            if state == mdp.start_state:
-                color = "lightskyblue"
-            elif state == mdp.goal_state:
-                color = "lightgreen"
-            rectangle = plt.Rectangle(
-                (ix * mdp.cell_widths[0], iy * mdp.cell_widths[1]), *mdp.cell_widths,
-                facecolor=color, edgecolor="0.6", linewidth=0.7,
-            )
-            axis.add_patch(rectangle)
-        axis.set(xlim=extent[:2], ylim=extent[2:], xlabel="x", ylabel="y", aspect="equal")
-        axis.set_xticks(np.linspace(0, mdp.bounds[0], mdp.nx + 1))
-        axis.set_yticks(np.linspace(0, mdp.bounds[1], mdp.ny + 1))
-        for state, label in ((mdp.start_state, "S"), (mdp.goal_state, "G")):
-            x, y = mdp.coordinates(state)
-            axis.text(x, y, label, ha="center", va="center", weight="bold")
+        plot_robot_map(mdp, axis)
     for state in mdp.trainable_states:
         x, y = mdp.coordinates(state)
         value_y = y - 0.2 * mdp.cell_widths[1] if state == mdp.start_state else y
