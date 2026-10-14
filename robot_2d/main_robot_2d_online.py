@@ -12,10 +12,10 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 def main(
-    *, n_episodes=30, gamma=0.95, horizon=100, training_episodes=4000, initial_R=0.1,
+    mdp, n_episodes=30, gamma=0.95, horizon=100, training_episodes=4000, initial_R=0.1,
     target_failure=0.1, initial_failure=None, eta=0.01, calibration_window=100,
     pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
-    method="proposed", R=None, C=None, noise_probability=0.3, noise_radius=1.2,
+    method="proposed", R=None, C=None, 
     verbose=True, trial=1,
 ):
     """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
@@ -24,13 +24,7 @@ def main(
     horizon caps episode length; goal, collision, and exit end deployment earlier.
     The simulator noise law is not supplied to the learning agent.
     """
-    mdp = Robot2DMotionMDP(
-        x_max=8.0, y_max=8.0, grid_shape=(8, 8),
-        obstacles=[(5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6)],
-        start_cell=(0, 0), goal_cell=(7, 7), movement_reward=0.01, goal_reward=1.0,
-        noise_probability=noise_probability, noise_radius=noise_radius,
-        max_episode_steps=horizon,
-    )
+    
     controller = ConformallyRobustController(
         mdp, gamma=gamma, horizon=horizon, training_horizon=horizon,
         training_episodes=training_episodes, initial_R=initial_R,
@@ -79,18 +73,25 @@ def main(
 
 
 if __name__ == "__main__":
-    # Change these ordinary settings for the numerical experiment.
+
+    mdp = Robot2DMotionMDP(
+        x_max=10.0, y_max=10.0, grid_shape=(10, 10),
+        obstacles=[(5, 1), (1, 3), (5, 6)],
+        start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.01, goal_reward=1.0,
+        noise_probability=0.2, noise_radius=1.5,
+    )
+    
     seeds = (87,)
     methods = ("proposed", "nominal", "global")
-    n_episodes = 30
+    n_episodes = 100
     training_episodes = 4000
     pilot_episodes = 100
     for trial, seed in enumerate(seeds, 1):
         shared_scores = None
         for index, method in enumerate(methods):
             controller = main(
-                method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
+                mdp=mdp, method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
                 n_episodes=n_episodes, training_episodes=training_episodes,
-                pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
+                pilot_episodes=pilot_episodes, calibration_scores=shared_scores
             )
             shared_scores = controller.initial_calibration_scores
