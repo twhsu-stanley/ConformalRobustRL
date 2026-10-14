@@ -102,7 +102,7 @@ if __name__ == "__main__":
     mdp = Robot2DMotionMDP(
         x_max=10.0, y_max=10.0, grid_shape=(10, 10),
         obstacles=[],
-        start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.001, goal_reward=1.0,
+        start_cell=(1, 1), goal_cell=(9, 8), movement_reward=0.00001, goal_reward=1.0,
     )
 
     seeds = (23,)
