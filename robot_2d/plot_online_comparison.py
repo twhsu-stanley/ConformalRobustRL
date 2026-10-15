@@ -17,6 +17,17 @@ from robot_2d.main_robot_2d_online import METHOD_SETTINGS
 from robot_2d.utils import plot_robot_map
 
 
+plt.rcParams.update({
+    "font.size": 14,
+    "axes.titlesize": 18,
+    "axes.labelsize": 16,
+    "xtick.labelsize": 14,
+    "ytick.labelsize": 14,
+    "legend.fontsize": 14,
+    "figure.titlesize": 20,
+})
+
+
 METHOD_LABELS = {method: settings[2] for method, settings in METHOD_SETTINGS.items()}
 
 
@@ -105,7 +116,7 @@ def plot_acp(runs):
         )
     axes[0].set(title="Scores and predictions, first trial",
                 xlabel="Deployment episode k", ylabel="Distance")
-    pilot_scores = run["pilot_scores"]
+    #pilot_scores = run["pilot_scores"]
 
     axes[1].plot(episodes, [row["delta_k"] for row in history], label=r"$\delta_k$")
     axes[1].axhline(run["delta"], color="black", linestyle="--", label=r"Target $\delta$")
@@ -123,7 +134,7 @@ def plot_acp(runs):
 
 def plot_performance(runs):
     """Compare the rewards and outcomes already recorded during online deployment."""
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
+    fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
     methods = list(dict.fromkeys(run["method"] for run in runs))
     outcomes = {"goal_reached": "Goal", "collision": "Obstacle", "workspace_exit": "Exit",
                 "timeout": "Step limit"}
@@ -142,10 +153,11 @@ def plot_performance(runs):
         positions = np.arange(len(outcomes)) + (index - (len(methods) - 1) / 2) * width
         axes[1].bar(positions, np.mean(rates, axis=0), width, color=color, label=label)
         axes[1].plot(positions, rates.T, "k.", alpha=0.6)
+    axes[1].plot([], [], "k.", alpha=0.6, label="Individual trials")
     axes[0].set(title="Cumulative mean discounted reward", xlabel="Online episode", ylabel="Reward")
     axes[1].set(title="Outcomes across online episodes", ylabel="Episode fraction", ylim=(0, 1.02))
     axes[1].set_xticks(np.arange(len(outcomes)), list(outcomes.values()))
-    fig.suptitle("Recorded online deployment episodes; dots denote individual trials")
+    fig.suptitle("Averaged cumulative returns and success rate")
     return fig
 
 
@@ -169,7 +181,7 @@ def plot_trajectories(run):
     ticks = np.unique(np.linspace(1, len(history), min(6, len(history)), dtype=int))
     fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
                  ticks=ticks, label="Deployment episode")
-    axis.set_title(f"{METHOD_LABELS[run['method']]}, trial {run['trial']}: "
+    axis.set_title(f"{METHOD_LABELS[run['method']]}, trial {run['trial']}\n"
                    f"{len(history)} deployment trajectories")
     return fig
 
@@ -195,7 +207,7 @@ def plot_comparison():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
-                axis.legend(fontsize=8)
+                axis.legend()
         fig.savefig(output_dir / f"{name}.png", dpi=180)
         plt.close(fig)
     for run in runs:
