@@ -225,14 +225,14 @@ def plot_comparison(window=10):
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend(fontsize=8)
-        for extension in ("png", "pdf"):
+        for extension in ("png"):
             fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)
     for run in runs:
         fig = plot_trajectories(run)
         name = (f"trajectories_{run['method']}_R{run['fixed_R']}_C{run['fixed_C']}"
                 f"_trial_{run['trial']}")
-        for extension in ("png", "pdf"):
+        for extension in ("png"):
             fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)
 

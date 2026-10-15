@@ -13,7 +13,7 @@ class ACP:
     returns zero; a rank above the calibration window returns positive infinity.
     """
 
-    def __init__(self, scores, delta=0.1, delta_1=None, eta=0.01, window_size=100):
+    def __init__(self, scores, delta=0.1, delta_1=None, eta=0.01, window_size=100, quantile_max=None):
         delta_1 = delta if delta_1 is None else delta_1
         if not 0 < delta < 1 or not 0 < delta_1 < 1:
             raise ValueError("Target and initial failure probabilities must be in (0, 1).")
@@ -30,6 +30,9 @@ class ACP:
         self.delta_1 = self.delta_k
         self.eta = float(eta)
         self.n_updates = 0
+        self.quantile_max = float(quantile_max) if quantile_max is not None else np.inf
+        if self.quantile_max <= 0:
+            raise ValueError("quantile_max must be positive.")
 
     @staticmethod
     def _validate_score(score):
@@ -42,7 +45,7 @@ class ACP:
         if rank <= 0:
             return 0.0
         if rank > len(self.scores):
-            return np.inf
+            return self.quantile_max
         C_hat = float(np.partition(np.asarray(self.scores), rank - 1)[rank - 1])
         if np.isnan(C_hat):
             raise ValueError("Conformal radius cannot be NaN.")

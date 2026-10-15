@@ -27,7 +27,7 @@ class ConformallyRobustController:
     def __init__(
         self, mdp, *, gamma=0.95, horizon=100, training_episodes=2000,
         training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
-        eta=0.01, calibration_scores=None, calibration_window=100, pilot_episodes=20,
+        eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100, pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, R=None, C=None,
         episode_setup=None,
@@ -74,6 +74,7 @@ class ConformallyRobustController:
             self.acp_options = {
                 "delta": delta, "delta_1": delta_1,
                 "eta": eta, "window_size": calibration_window,
+                "quantile_max": quantile_max,
             }
             # Validate calibration settings before any potentially expensive pilot run.
             validated = ACP([0.0], **self.acp_options)
