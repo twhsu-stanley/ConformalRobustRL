@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
-from robot_2d.plot_online_comparison import plot_calibration
+from robot_2d.plot_online_comparison import plot_acp
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from robot_2d.utils import plot_conformal_history
 
@@ -162,14 +162,19 @@ class ContactCalibrationTests(unittest.TestCase):
         run = {
             "mdp": controller.deployment_env, "history": controller.history,
             "initial_calibration_scores": controller.initial_calibration_scores,
+            "pilot_scores": controller.pilot_scores,
             "delta": 0.2, "delta_1": 0.2, "calibration_window": 100,
         }
-        for figure in (plot_conformal_history(controller.history, 0.2), plot_calibration([run], 2)):
+        for figure in (plot_conformal_history(controller.history, 0.2), plot_acp([run])):
             try:
                 figure.canvas.draw()
-                coverage_axis = figure.axes[3] if len(figure.axes) == 6 else figure.axes[1]
-                coverage = np.ma.asarray(coverage_axis.lines[0].get_ydata()).filled(np.nan)
-                self.assertTrue(np.all(np.isnan(coverage)))
+                if len(figure.axes) == 6:
+                    coverage = np.ma.asarray(figure.axes[3].lines[0].get_ydata()).filled(np.nan)
+                    self.assertTrue(np.all(np.isnan(coverage)))
+                else:
+                    self.assertEqual(len(figure.axes), 3)
+                    self.assertTrue(np.all(np.isnan(figure.axes[0].lines[0].get_ydata())))
+                    np.testing.assert_allclose(figure.axes[2].lines[0].get_ydata(), [0.2, 0.2])
             finally:
                 plt.close(figure)
 

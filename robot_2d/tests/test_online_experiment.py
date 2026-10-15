@@ -141,7 +141,7 @@ class OnlineSettingsTests(unittest.TestCase):
             patch("robot_2d.utils.plot_conformal_history", side_effect=AssertionError("ACP plot")),
         ):
             output_dir = Path(directory) / "saved_results/online"
-            for method in ("nominal", "R_contamination_0.1", "R_contamination_0.3"):
+            for method in ("nominal", "R_contamination_0.1", "R_contamination_0.5"):
                 with self.subTest(method=method):
                     controller = main(
                         Robot2DMotionMDP(), method=method, n_deployment_episodes=2,
@@ -190,7 +190,7 @@ class OnlineSettingsTests(unittest.TestCase):
                 mdp=mdp, n_deployment_episodes=4, training_episodes=20, horizon=7, pilot_episodes=3,
                 seed=87, shift_period=10, save_plots=False, verbose=False,
             )
-            methods = ("nominal", "R_contamination_0.1", "R_contamination_0.3")
+            methods = ("nominal", "R_contamination_0.1", "R_contamination_0.5")
             for index, method in enumerate(methods, 1):
                 other = main(
                     mdp=mdp, method=method, n_deployment_episodes=2, training_episodes=10,
@@ -219,7 +219,7 @@ class OnlineSettingsTests(unittest.TestCase):
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
             methods = {"proposed": None, "nominal": 0.0,
-                       "R_contamination_0.1": 0.1, "R_contamination_0.3": 0.3}
+                       "R_contamination_0.1": 0.1, "R_contamination_0.5": 0.5}
             for method, expected_R in methods.items():
                 with self.subTest(method=method):
                     controller = main(
@@ -293,7 +293,7 @@ class OnlineSettingsTests(unittest.TestCase):
         cases = {
             "nominal": dict(method="nominal"),
             "R_contamination_0.1": dict(method="R_contamination_0.1"),
-            "R_contamination_0.3": dict(method="R_contamination_0.3"),
+            "R_contamination_0.5": dict(method="R_contamination_0.5"),
             "fixed": dict(R=0.2, C=0.7),
             "R_fixed": dict(R=0.2),
             "C_fixed": dict(C=0.7),

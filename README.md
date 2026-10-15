@@ -363,20 +363,11 @@ satisfy the paper's assumptions; accepting a callable does not verify them.
 
 ### ACP calibration: `acp_calibration`
 
-The four panels show first-seed continuous episode scores, true support bounds,
-and pre-episode radii,
-cumulative episode coverage, trailing-window coverage, and the mean number of
-states in localized neighborhoods compared with the 101-state global support.
-The support-size diagnostic averages over nominal targets of nonterminal
-state-action pairs using the fixed trial map.
-`plot_comparison(window=10)` controls the trailing
-coverage window independently of the calibration window used during the run.
-
-Coverage compares ACP with a rolling quantile at the fixed target failure
-parameter and with a frozen initial pilot quantile. These two alternatives are
-replayed on the same saved score stream. They isolate calibration behavior;
-they do not simulate counterfactual policies or establish navigation benefits
-for separate frozen-calibration controllers.
+The three panels show the first trial's online scores, true support bounds and
+pre-episode radii; its pilot scores; and its adaptive delta history against the
+target failure probability. Pilot scores are indexed by their position in the
+saved score list; pilots with no score are omitted. If calibration scores were
+supplied directly, the pilot panel states that no pilot episodes were run.
 
 ACP uses rank `ceil((1-delta_k)*(N+1))` without interpolation. The score is the
 maximum disturbance norm over nonterminal transitions: indices

@@ -13,7 +13,6 @@ import numpy as np
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from acp import ACP
 from robot_2d.main_robot_2d_online import METHOD_SETTINGS
 from robot_2d.utils import plot_robot_map
 
@@ -85,71 +84,40 @@ def plot_R(runs):
     return fig
 
 
-def plot_calibration(runs, window):
-    fig, axes = plt.subplots(2, 2, figsize=(11, 8), constrained_layout=True)
-    history = runs[0]["history"]
+def plot_acp(runs):
+    """Show online scores and radii, pilot scores, and adaptive delta for the first trial."""
+    fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
+    run = runs[0]
+    history = run["history"]
     episodes = np.arange(1, len(history) + 1)
     radii = np.asarray([row["C_hat"] for row in history])
     scores = np.asarray([row["score"] for row in history], dtype=float)
-    axes[0, 0].plot(episodes, scores, ".", label="Maximum nonterminal deviation")
-    axes[0, 0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label="Predicted C")
-    support_bounds = [row.get("C_star_k", runs[0]["mdp"].noise_radius) for row in history]
+    axes[0].plot(episodes, scores, ".", label="Maximum nonterminal deviation")
+    axes[0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label="Predicted C")
+    support_bounds = [row.get("C_star_k", run["mdp"].noise_radius) for row in history]
     if "C_star_k" in history[0]:
-        axes[0, 0].plot(episodes, support_bounds, "k:", label="True support bound C*")
+        axes[0].plot(episodes, support_bounds, "k:", label="True support bound C*")
     ceiling = max(1, max(support_bounds), np.nanmax(scores, initial=0)) * 1.1
     unbounded = np.isposinf(radii)
     if np.any(unbounded):
-        axes[0, 0].scatter(
+        axes[0].scatter(
             episodes[unbounded], np.full(sum(unbounded), ceiling), marker="^", label="Unbounded",
         )
-    all_misses, rolling_misses, frozen_misses, sizes = [], [], [], []
-    for run in runs:
-        quantile = ACP(
-            run["initial_calibration_scores"], delta=run["delta"],
-            delta_1=run["delta_1"], window_size=run["calibration_window"],
-        )
-        frozen_radius = quantile.quantile()
-        quantile.delta_k = run["delta"]
-        fixed, frozen, support = [], [], []
-        mdp = run["mdp"].clone(nominal=True)
-        for row in run["history"]:
-            score = row["score"]
-            fixed.append(np.nan if score is None else int(score > quantile.quantile()))
-            frozen.append(np.nan if score is None else int(score > frozen_radius))
-            if score is not None:
-                quantile.scores.append(score)
-            if "obstacles" in row:
-                mdp.set_obstacles(row["obstacles"])
-            radius = row["C_used"]
-            counts = [len(mdp.localized_uncertainty_states(s, radius)) for s in range(mdp.n_state)]
-            nominal_targets = mdp.nominal_transitions[mdp.trainable_states]
-            support.append(np.mean(np.asarray(counts)[nominal_targets]))
-        all_misses.append([row["miscoverage"] for row in run["history"]])
-        rolling_misses.append(fixed)
-        frozen_misses.append(frozen)
-        sizes.append(support)
-    for misses, label, style in (
-        (all_misses, "ACP", "-"), (rolling_misses, "Rolling fixed delta", "--"),
-        (frozen_misses, "Frozen pilot quantile", ":"),
-    ):
-        misses = np.ma.masked_invalid(np.asarray(misses, dtype=float))
-        counts = (~np.ma.getmaskarray(misses)).cumsum(axis=1)
-        coverage = 1 - np.ma.divide(misses.filled(0).cumsum(axis=1), counts)
-        axes[0, 1].plot(episodes, coverage.mean(axis=0), style, label=label)
-        coverage = np.ma.stack([
-            1 - misses[:, max(0, k - window + 1):k + 1].mean(axis=1)
-            for k in range(len(history))
-        ], axis=1)
-        axes[1, 0].plot(episodes, coverage.mean(axis=0), style, label=label)
-    for axis in (axes[0, 1], axes[1, 0]):
-        axis.axhline(1 - runs[0]["delta"], color="black", linestyle=":", label="Target")
-        axis.set_ylim(0, 1.02)
-    axes[1, 1].plot(episodes, np.mean(sizes, axis=0), label="Localized support")
-    axes[1, 1].axhline(runs[0]["mdp"].n_state, color="black", linestyle=":", label="Global support")
-    titles = ("Scores and predictions, first seed", "Cumulative coverage, same score stream",
-              f"Trailing {window}-episode coverage", "Mean neighborhood size")
-    for axis, title in zip(axes.ravel(), titles):
-        axis.set(title=title, xlabel="Episode")
+    axes[0].set(title="Scores and predictions, first trial",
+                xlabel="Deployment episode k", ylabel="Distance")
+    pilot_scores = run["pilot_scores"]
+
+    axes[1].plot(episodes, [row["delta_k"] for row in history], label=r"$\delta_k$")
+    axes[1].axhline(run["delta"], color="black", linestyle="--", label=r"Target $\delta$")
+    axes[1].set(title="Adaptive failure parameter, first trial",
+                    xlabel="Deployment episode k", ylabel="Failure parameter")
+
+    #axes[2].plot(np.arange(1, len(pilot_scores) + 1), pilot_scores, ".-", label="Pilot scores")
+    #if not pilot_scores:
+    #    axes[2].text(0.5, 0.5, "No pilot episodes", ha="center", va="center",
+    #                 transform=axes[2].transAxes)
+    #axes[2].set(title="Pilot scores, first trial", xlabel="Pilot score index", ylabel="Score")
+    
     return fig
 
 
@@ -206,7 +174,7 @@ def plot_trajectories(run):
     return fig
 
 
-def plot_comparison(window=10):
+def plot_comparison():
     """Read saved runs and plot R, ACP, performance, and all deployment trajectories."""
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     runs = []
@@ -222,7 +190,7 @@ def plot_comparison(window=10):
     if estimated:
         figures["r_estimation"] = plot_R(estimated)
     if calibrated:
-        figures["acp_calibration"] = plot_calibration(calibrated, window)
+        figures["acp_calibration"] = plot_acp(calibrated)
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")

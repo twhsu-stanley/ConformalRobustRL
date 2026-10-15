@@ -18,7 +18,7 @@ METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
     "nominal": (0.0, 0.0, "Nominal"),
     "R_contamination_0.1": (0.1, np.inf, "R-contamination (R=0.1)"),
-    "R_contamination_0.3": (0.3, np.inf, "R-contamination (R=0.3)"),
+    "R_contamination_0.5": (0.5, np.inf, "R-contamination (R=0.5)"),
 }
 
 
@@ -32,7 +32,7 @@ def main(
     """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
 
     method='nominal' plans with R=C=0. Methods 'R_contamination_0.1' and
-    'R_contamination_0.3' fix R_used at 0.1 and 0.3, respectively, with C_used=infinity.
+    'R_contamination_0.5' fix R_used at 0.1 and 0.5, respectively, with C_used=infinity.
     R=None enables mismatch estimation; C=None enables ACP and calibration pilots.
     Fixed R/C disable the corresponding updates and allow policy reuse when both are fixed.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
@@ -133,13 +133,13 @@ if __name__ == "__main__":
         start_cell=(1, 1), goal_cell=(7, 6), movement_reward=0.0, goal_reward=1.0,
     )
 
-    seeds = (23,)
-    methods = ("proposed", "nominal")#, "R_contamination_0.1", "R_contamination_0.3")
-    n_deployment_episodes = 20
+    seeds = (23, 67, 87, 101, 922)
+    methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
+    n_deployment_episodes = 100
     training_episodes = 5000
     pilot_episodes = 100
     R_star = 0.4
-    shift_period = 200
+    shift_period = 100
 
     for trial, seed in enumerate(seeds, 1):
         for index, method in enumerate(methods):
@@ -147,6 +147,6 @@ if __name__ == "__main__":
                 mdp=mdp, gamma=0.9, method=method, seed=seed + 100000 * index,
                 trial=trial, save_plots=False,
                 n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
-                eta=0.05, calibration_window=100, pilot_episodes=pilot_episodes, quantile_max = 3.0,
+                eta=0.1, calibration_window=100, pilot_episodes=pilot_episodes, quantile_max = 3.0,
                 R_star=R_star, shift_period=shift_period,
             )
