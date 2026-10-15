@@ -78,8 +78,8 @@ def plot_R(runs):
         estimates.append(estimate)
         axis.plot(np.arange(1, len(estimate) + 1), estimate, color="C0", alpha=0.25)
     episodes = np.arange(1, len(estimates[0]) + 1)
-    axis.plot(episodes, np.mean(estimates, axis=0), label="Estimated R")
-    axis.axhline(np.mean(probabilities), color="black", linestyle=":", label="True R*")
+    axis.plot(episodes, np.mean(estimates, axis=0), label=r"Estimated $\hat{R}_k$")
+    axis.axhline(np.mean(probabilities), color="black", linestyle=":", label=r"True $R^\star$")
     axis.set(title="R estimation", xlabel="Deployment episode k", ylabel="Probability")
     return fig
 
@@ -92,11 +92,11 @@ def plot_acp(runs):
     episodes = np.arange(1, len(history) + 1)
     radii = np.asarray([row["C_hat"] for row in history])
     scores = np.asarray([row["score"] for row in history], dtype=float)
-    axes[0].plot(episodes, scores, ".", label="Maximum nonterminal deviation")
-    axes[0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label="Predicted C")
+    axes[0].plot(episodes, scores, ".", label="nonconformity scores")
+    axes[0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$")
     support_bounds = [row.get("C_star_k", run["mdp"].noise_radius) for row in history]
     if "C_star_k" in history[0]:
-        axes[0].plot(episodes, support_bounds, "k:", label="True support bound C*")
+        axes[0].plot(episodes, support_bounds, "k:", label=r"True support bound $C^\star$")
     ceiling = max(1, max(support_bounds), np.nanmax(scores, initial=0)) * 1.1
     unbounded = np.isposinf(radii)
     if np.any(unbounded):
