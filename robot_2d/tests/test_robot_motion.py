@@ -357,7 +357,7 @@ class OnlineRunnerTests(unittest.TestCase):
                         all(record["training"]["zero_initialized"] for record in history)
                     )
                     self.assertEqual(results["final_R"], controller.R_hat)
-                    self.assertEqual(results["final_delta"], controller.calibrator.delta_k)
+                    self.assertEqual(results["final_delta"], controller.acp.delta_k)
                     self.assertNotIn("evaluation", results)
                     self.assertFalse(hasattr(controller, "results"))
                     self.assertEqual(results["Q"].shape, (65, 4))

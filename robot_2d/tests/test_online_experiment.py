@@ -131,6 +131,41 @@ class ContinuousDeploymentTests(unittest.TestCase):
 
 
 class OnlineSettingsTests(unittest.TestCase):
+    def test_baselines_skip_ACP_pilots_and_calibration_outputs(self):
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_no_acp_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+            patch("conformally_robust_controller.ACP", side_effect=AssertionError("ACP called")),
+            patch("robot_2d.utils.plot_conformal_history", side_effect=AssertionError("ACP plot")),
+        ):
+            output_dir = Path(directory) / "saved_results/online"
+            for method in ("nominal", "R_contamination_0.1", "R_contamination_0.3"):
+                with self.subTest(method=method):
+                    controller = main(
+                        Robot2DMotionMDP(), method=method, n_deployment_episodes=2,
+                        training_episodes=10, horizon=5, pilot_episodes=20,
+                        calibration_scores=[], delta=2, eta=0, calibration_window=0,
+                        save_plots=True, verbose=False,
+                    )
+                    controller.initialize_calibration()
+                    controller.run_episode()
+                    self.assertIsNone(controller.acp)
+                    self.assertFalse(controller.pilot_scores)
+                    self.assertFalse(controller.initial_calibration_scores)
+                    name = f"{method}_R{controller.fixed_R}_C{controller.fixed_C}_trial_1"
+                    with (output_dir / f"results_{name}.pkl").open("rb") as file:
+                        saved = pickle.load(file)
+                    for key in ("delta", "delta_1", "eta", "calibration_window", "final_delta",
+                                "pilot_scores", "initial_calibration_scores", "final_R"):
+                        self.assertNotIn(key, saved)
+                    for row in saved["history"]:
+                        for key in ("C_hat", "miscoverage", "delta_k", "delta_next",
+                                    "R_hat_next", "transition_count", "mismatch_count"):
+                            self.assertNotIn(key, row)
+                    self.assertFalse((output_dir / f"online_uncertainty_{name}.png").exists())
+                    self.assertTrue((output_dir / f"final_policy_{name}.png").exists())
+            self.assertEqual(len(list(output_dir.iterdir())), 6)
+
     def test_trial_map_stays_fixed_across_methods_pilots_and_continuation(self):
         with (
             tempfile.TemporaryDirectory(prefix="robot_paired_maps_") as directory,
@@ -157,8 +192,7 @@ class OnlineSettingsTests(unittest.TestCase):
             for index, method in enumerate(methods, 1):
                 other = main(
                     mdp=mdp, method=method, n_deployment_episodes=2, training_episodes=10,
-                    horizon=7,
-                    calibration_scores=proposed.initial_calibration_scores, pilot_episodes=0,
+                    horizon=7, pilot_episodes=0,
                     seed=87 + 100000 * index, shift_period=10,
                     save_plots=False, verbose=False,
                 )
@@ -166,7 +200,7 @@ class OnlineSettingsTests(unittest.TestCase):
                 for expected, actual in zip(proposed.history, other.history):
                     self.assertEqual(actual["C_star_k"], expected["C_star_k"])
                 self.assertFalse(other.pilot_scores)
-                filename = f"results_{method}_RNone_CNone_trial_1.pkl"
+                filename = f"results_{method}_R{other.fixed_R}_C{other.fixed_C}_trial_1.pkl"
                 with (Path(directory) / "saved_results/online" / filename).open("rb") as file:
                     saved = pickle.load(file)
                 np.testing.assert_array_equal(saved["mdp"].obstacle_mask, trial_map)
@@ -177,7 +211,7 @@ class OnlineSettingsTests(unittest.TestCase):
                 np.testing.assert_array_equal(observed, trial_map)
             np.testing.assert_array_equal(mdp.obstacle_mask, trial_map)
 
-    def test_baseline_settings_preserve_estimator_counts(self):
+    def test_runner_maps_methods_to_fixed_parameters_and_adaptive_updates(self):
         with (
             tempfile.TemporaryDirectory(prefix="robot_online_settings_") as directory,
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
@@ -193,14 +227,28 @@ class OnlineSettingsTests(unittest.TestCase):
                         save_plots=False, verbose=False,
                     )
                     first, last = controller.history
-                    count = first["episode_length"] + last["episode_length"]
-                    self.assertEqual(last["transition_count"], count)
-                    self.assertAlmostEqual(last["R_hat_next"], last["mismatch_count"] / count)
-                    self.assertEqual(controller.calibrator.n_updates, 2)
+                    if method == "proposed":
+                        count = first["episode_length"] + last["episode_length"]
+                        self.assertEqual(last["transition_count"], count)
+                        self.assertAlmostEqual(last["R_hat_next"], last["mismatch_count"] / count)
+                        self.assertEqual(controller.acp.n_updates, 2)
+                    else:
+                        self.assertIsNone(controller.acp)
+                        self.assertIsNone(controller.R_hat)
+                        self.assertEqual(controller.transition_count, 0)
+                        self.assertEqual(controller.mismatch_count, 0)
+                        self.assertFalse(controller.initial_calibration_scores)
+                        for row in controller.history:
+                            self.assertNotIn("C_hat", row)
+                            self.assertNotIn("miscoverage", row)
+                            self.assertNotIn("delta_next", row)
+                            self.assertNotIn("R_hat_next", row)
+                            self.assertNotIn("transition_count", row)
                     self.assertTrue(all(r["training"]["zero_initialized"]
                                         for r in controller.history))
                     if method == "nominal":
                         self.assertEqual(last["R_used"], 0)
+                        self.assertEqual(last["C_used"], 0)
                         self.assertTrue(last["training_reused"])
                     elif method == "proposed":
                         self.assertAlmostEqual(last["R_used"], first["R_hat_next"])
@@ -211,7 +259,7 @@ class OnlineSettingsTests(unittest.TestCase):
                             self.assertEqual(row["C_used"], np.inf)
                         self.assertEqual(controller.agent.R, expected_R)
                         self.assertEqual(controller.agent.C, np.inf)
-                        self.assertFalse(last["training_reused"])
+                        self.assertTrue(last["training_reused"])
 
     def test_fixed_parameters_and_ACP_update_order(self):
         with (
@@ -225,7 +273,9 @@ class OnlineSettingsTests(unittest.TestCase):
             )
             self.assertTrue(all(row["R_used"] == 0.2 for row in fixed.history))
             self.assertTrue(all(row["C_used"] == 0.7 for row in fixed.history))
-            self.assertEqual(fixed.calibrator.delta_k, 0.1)
+            self.assertIsNone(fixed.acp)
+            self.assertIsNone(fixed.R_hat)
+            self.assertTrue(fixed.history[-1]["training_reused"])
             adaptive = main(
                 mdp=Robot2DMotionMDP(),
                 n_deployment_episodes=2, training_episodes=10, horizon=5,
@@ -234,8 +284,8 @@ class OnlineSettingsTests(unittest.TestCase):
             )
             self.assertEqual(adaptive.history[0]["C_hat"], 0.1)
             coverage = 1 - np.mean([row["miscoverage"] for row in adaptive.history])
-            change = adaptive.calibrator.delta_k - adaptive.calibrator.delta_1
-            self.assertAlmostEqual(coverage, 0.9 + change / (adaptive.calibrator.eta * 2))
+            change = adaptive.acp.delta_k - adaptive.acp.delta_1
+            self.assertAlmostEqual(coverage, 0.9 + change / (adaptive.acp.eta * 2))
 
     def test_controller_continuation_preserves_experiment_settings(self):
         cases = {
@@ -243,6 +293,8 @@ class OnlineSettingsTests(unittest.TestCase):
             "R_contamination_0.1": dict(method="R_contamination_0.1"),
             "R_contamination_0.3": dict(method="R_contamination_0.3"),
             "fixed": dict(R=0.2, C=0.7),
+            "R_fixed": dict(R=0.2),
+            "C_fixed": dict(C=0.7),
         }
         with (
             tempfile.TemporaryDirectory(prefix="robot_online_continue_") as directory,
@@ -260,26 +312,60 @@ class OnlineSettingsTests(unittest.TestCase):
                     previous_count = controller.transition_count
                     record = controller.run_episode()
                     self.assertEqual(record["episode"], 2)
-                    self.assertEqual(record["transition_count"],
-                                     previous_count + record["episode_length"])
-                    if name == "nominal":
+                    if controller.fixed_R is not None and controller.fixed_C is not None:
                         self.assertIs(controller.agent, previous_agent)
-                        self.assertEqual(record["R_used"], 0)
-                        self.assertEqual(record["C_used"], 0)
+                        self.assertTrue(record["training_reused"])
                     else:
                         self.assertIsNot(controller.agent, previous_agent)
-                        expected_C = 0.7 if name == "fixed" else np.inf
-                        self.assertEqual(record["C_used"], expected_C)
-                        expected_R = {"fixed": 0.2, "R_contamination_0.1": 0.1,
-                                      "R_contamination_0.3": 0.3}[name]
-                        self.assertEqual(record["R_used"], expected_R)
-                        self.assertEqual(controller.agent.R, expected_R)
-                        self.assertEqual(controller.agent.C, expected_C)
-                    if name == "fixed":
-                        self.assertEqual(record["R_used"], 0.2)
-                        self.assertEqual(controller.calibrator.n_updates, 0)
+                        self.assertFalse(record["training_reused"])
+                    if controller.fixed_R is None:
+                        self.assertEqual(record["transition_count"],
+                                         previous_count + record["episode_length"])
+                        self.assertEqual(record["R_used"], controller.history[0]["R_hat_next"])
                     else:
-                        self.assertEqual(controller.calibrator.n_updates, 2)
+                        self.assertEqual(record["R_used"], controller.fixed_R)
+                        self.assertEqual(controller.transition_count, 0)
+                        self.assertNotIn("R_hat_next", record)
+                    if controller.fixed_C is None:
+                        self.assertEqual(controller.acp.n_updates, 2)
+                        self.assertEqual(record["C_used"], record["C_hat"])
+                    else:
+                        self.assertIsNone(controller.acp)
+                        self.assertFalse(controller.pilot_scores)
+                        self.assertEqual(record["C_used"], controller.fixed_C)
+
+    def test_mixed_adaptive_inputs_save_and_plot_only_enabled_components(self):
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_mixed_updates_") as directory,
+            patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
+        ):
+            output_dir = Path(directory) / "saved_results/online"
+            for settings in (dict(R=0.3), dict(C=0.7)):
+                with self.subTest(settings=settings):
+                    controller = main(
+                        Robot2DMotionMDP(), n_deployment_episodes=2, training_episodes=10,
+                        horizon=5, pilot_episodes=2, save_plots=True, verbose=False, **settings,
+                    )
+                    name = f"proposed_R{controller.fixed_R}_C{controller.fixed_C}_trial_1"
+                    with (output_dir / f"results_{name}.pkl").open("rb") as file:
+                        saved = pickle.load(file)
+                    self.assertEqual("final_R" in saved, controller.fixed_R is None)
+                    self.assertEqual("final_delta" in saved, controller.fixed_C is None)
+                    self.assertEqual("pilot_scores" in saved, controller.fixed_C is None)
+                    if controller.fixed_C is None:
+                        self.assertEqual(len(controller.pilot_scores), 2)
+                        self.assertEqual(controller.acp.n_updates, 2)
+                        self.assertEqual(controller.transition_count, 0)
+                    else:
+                        self.assertFalse(controller.pilot_scores)
+                        self.assertIsNone(controller.acp)
+                    for row in saved["history"]:
+                        self.assertEqual("R_hat_next" in row, controller.fixed_R is None)
+                        self.assertEqual("C_hat" in row, controller.fixed_C is None)
+                        self.assertFalse(row["training_reused"])
+                    self.assertTrue((output_dir / f"online_uncertainty_{name}.png").exists())
+                    self.assertTrue((output_dir / f"final_policy_{name}.png").exists())
+            self.assertEqual(len(list(output_dir.iterdir())), 6)
 
     def test_episode_maps_noise_and_saved_truth_match_the_actual_rollouts(self):
         with (

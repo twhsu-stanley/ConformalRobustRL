@@ -14,14 +14,11 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from acp import ACP
+from robot_2d.main_robot_2d_online import METHOD_SETTINGS
 from robot_2d.utils import plot_robot_map
 
 
-METHOD_LABELS = {
-    "proposed": "Proposed", "nominal": "Nominal",
-    "R_contamination_0.1": "R-contamination (R=0.1)",
-    "R_contamination_0.3": "R-contamination (R=0.3)",
-}
+METHOD_LABELS = {method: settings[2] for method, settings in METHOD_SETTINGS.items()}
 
 
 def disk_rectangle_area(radius, xlo, xhi, ylo, yhi):
@@ -129,9 +126,8 @@ def plot_calibration(runs, window):
         rolling_misses.append(fixed)
         frozen_misses.append(frozen)
         sizes.append(support)
-    prediction_label = "ACP" if runs[0].get("fixed_C") is None else "Fixed C"
     for misses, label, style in (
-        (all_misses, prediction_label, "-"), (rolling_misses, "Rolling fixed delta", "--"),
+        (all_misses, "ACP", "-"), (rolling_misses, "Rolling fixed delta", "--"),
         (frozen_misses, "Frozen pilot quantile", ":"),
     ):
         misses = np.asarray(misses)
@@ -142,10 +138,6 @@ def plot_calibration(runs, window):
             coverage.append([1 - np.mean(row[max(0, k - window + 1):k + 1])
                              for k in range(len(row))])
         axes[1, 0].plot(episodes, np.mean(coverage, axis=0), style, label=label)
-    planned = [[row["planned_miscoverage"] for row in run["history"]] for run in runs]
-    if np.any(np.asarray(planned) != all_misses):
-        coverage = 1 - np.cumsum(planned, axis=1) / episodes
-        axes[0, 1].plot(episodes, np.mean(coverage, axis=0), "-.", label="Planning-radius coverage")
     for axis in (axes[0, 1], axes[1, 0]):
         axis.axhline(1 - runs[0]["delta"], color="black", linestyle=":", label="Target")
         axis.set_ylim(0, 1.02)
@@ -211,21 +203,23 @@ def plot_trajectories(run):
     return fig
 
 
-def plot_comparison(window=10, delta_R=0.05):
+def plot_comparison(window=10):
     """Read saved runs and plot R, ACP, performance, and all deployment trajectories."""
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     runs = []
-    for method in METHOD_LABELS:
-        for filename in sorted(output_dir.glob(f"results_{method}_RNone_CNone_trial_*.pkl")):
+    for method, (R, C, _) in METHOD_SETTINGS.items():
+        for filename in sorted(output_dir.glob(f"results_{method}_R{R}_C{C}_trial_*.pkl")):
             with filename.open("rb") as file:
                 runs.append(pickle.load(file))
     if not runs:
         raise FileNotFoundError(f"No online comparison results found in {output_dir}.")
-    proposed = [run for run in runs if run["method"] == "proposed"]
+    estimated = [run for run in runs if run["fixed_R"] is None]
+    calibrated = [run for run in runs if run["fixed_C"] is None]
     figures = {"policy_comparison": plot_performance(runs)}
-    if proposed:
-        figures["r_estimation"] = plot_R(proposed, delta_R)
-        figures["acp_calibration"] = plot_calibration(proposed, window)
+    if estimated:
+        figures["r_estimation"] = plot_R(estimated)
+    if calibrated:
+        figures["acp_calibration"] = plot_calibration(calibrated, window)
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")

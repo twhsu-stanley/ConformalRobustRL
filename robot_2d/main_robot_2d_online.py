@@ -15,6 +15,14 @@ from robot_2d.online_settings import randomize_obstacles, sample_deviation, C_st
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
+METHOD_SETTINGS = {
+    "proposed": (None, None, "Proposed"),
+    "nominal": (0.0, 0.0, "Nominal"),
+    "R_contamination_0.1": (0.1, np.inf, "R-contamination (R=0.1)"),
+    "R_contamination_0.3": (0.3, np.inf, "R-contamination (R=0.3)"),
+}
+
+
 def main(
     mdp, n_deployment_episodes=30, gamma=0.95, horizon=100, training_episodes=4000, R_hat_init=0.1,
     delta=0.1, delta_1=None, eta=0.01, calibration_window=100,
@@ -26,6 +34,8 @@ def main(
 
     method='nominal' plans with R=C=0. Methods 'R_contamination_0.1' and
     'R_contamination_0.3' fix R_used at 0.1 and 0.3, respectively, with C_used=infinity.
+    R=None enables mismatch estimation; C=None enables ACP and calibration pilots.
+    Fixed R/C disable the corresponding updates and allow policy reuse when both are fixed.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
     The supplied obstacle map stays fixed throughout the run. Each episode has
     a fixed disturbance law whose support bound varies slowly within [0.5, 2.0],
@@ -34,6 +44,10 @@ def main(
     The trial loop generates one map and passes it to every method. Matching
     shift_period gives methods the same support schedule even when pilots are skipped.
     """
+    if method not in METHOD_SETTINGS:
+        raise ValueError(f"Unknown method: {method}.")
+    if method != "proposed":
+        R, C, _ = METHOD_SETTINGS[method]
     if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
         raise ValueError("This shifting-noise experiment requires unit grid cells.")
     if not np.isfinite(R_star) or not 0 < R_star < 1:
@@ -53,7 +67,7 @@ def main(
         training_episodes=training_episodes, R_hat_init=R_hat_init,
         delta=delta, delta_1=delta_1, eta=eta,
         calibration_scores=calibration_scores, calibration_window=calibration_window,
-        pilot_episodes=pilot_episodes, seed=seed, method=method, R=R, C=C,
+        pilot_episodes=pilot_episodes, seed=seed, R=R, C=C,
         episode_setup=prepare_episode,
     )
     controller.run(n_deployment_episodes, verbose=verbose)
@@ -62,19 +76,24 @@ def main(
         "method": method, "seed": seed, "trial": trial, "mdp": mdp,
         "gamma": gamma, "horizon": horizon,
         "R_star": R_star, "shift_period": shift_period,
-        "fixed_R": R, "fixed_C": C,
-        "delta": delta, "delta_1": delta_1,
-        "eta": eta, "calibration_window": calibration_window,
-        "pilot_scores": controller.pilot_scores,
-        "initial_calibration_scores": controller.initial_calibration_scores,
-        "final_R": controller.R_hat, "final_delta": controller.calibrator.delta_k,
+        "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
         "history": controller.history,
         "Q": controller.Q, "policy": controller.policy,
         "visit_counts": controller.agent.visit_counts,
     }
+    if controller.fixed_R is None:
+        results["final_R"] = controller.R_hat
+    if controller.acp is not None:
+        results.update({
+            "delta": delta, "delta_1": delta_1,
+            "eta": eta, "calibration_window": calibration_window,
+            "pilot_scores": controller.pilot_scores,
+            "initial_calibration_scores": controller.initial_calibration_scores,
+            "final_delta": controller.acp.delta_k,
+        })
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     output_dir.mkdir(parents=True, exist_ok=True)
-    test_name = f"{method}_R{R}_C{C}_trial_{trial}"
+    test_name = f"{method}_R{controller.fixed_R}_C{controller.fixed_C}_trial_{trial}"
     filename = output_dir / f"results_{test_name}.pkl"
     with filename.open("wb") as file:
         pickle.dump(results, file)
@@ -84,9 +103,10 @@ def main(
         matplotlib.use("Agg")
         from robot_2d.utils import plot_conformal_history, plot_robot_motion
         import matplotlib.pyplot as plt
-        fig = plot_conformal_history(controller.history, controller.delta)
-        fig.savefig(output_dir / f"online_uncertainty_{test_name}.png", dpi=160)
-        plt.close(fig)
+        if controller.fixed_R is None or controller.acp is not None:
+            fig = plot_conformal_history(controller.history, controller.delta)
+            fig.savefig(output_dir / f"online_uncertainty_{test_name}.png", dpi=160)
+            plt.close(fig)
         fig = plot_robot_motion(
             mdp, controller.Q, controller.policy, controller.history[-1]["positions"],
             f"Final {method} policy",
@@ -115,12 +135,11 @@ if __name__ == "__main__":
     for trial, seed in enumerate(seeds, 1):
         mdp.set_obstacles([])
         randomize_obstacles(mdp, np.random.default_rng(seed), 20)
-        shared_scores = None
         for index, method in enumerate(methods):
-            controller = main(
-                mdp=mdp, gamma=0.9, method=method, seed=seed + 100000 * index, trial=trial, save_plots=False,
+            main(
+                mdp=mdp, gamma=0.9, method=method, seed=seed + 100000 * index,
+                trial=trial, save_plots=False,
                 n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
-                eta=0.1, calibration_window=200, pilot_episodes=pilot_episodes, calibration_scores=shared_scores,
+                eta=0.1, calibration_window=200, pilot_episodes=pilot_episodes,
                 R_star=R_star, shift_period=shift_period,
             )
-            shared_scores = controller.initial_calibration_scores

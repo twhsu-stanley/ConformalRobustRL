@@ -61,8 +61,11 @@ class OnlineTrajectoryPlotTests(unittest.TestCase):
                     main(mdp, method=method, trial=trial, seed=trial, n_deployment_episodes=3,
                          training_episodes=10, horizon=5, calibration_scores=[0.8] * 20,
                          save_plots=False, verbose=False)
+                    R, C = {"proposed": (None, None), "nominal": (0.0, 0.0),
+                            "R_contamination_0.1": (0.1, np.inf),
+                            "R_contamination_0.3": (0.3, np.inf)}[method]
                     for extension in ("png", "pdf"):
-                        expected.add(f"trajectories_{method}_RNone_CNone_trial_{trial}.{extension}")
+                        expected.add(f"trajectories_{method}_R{R}_C{C}_trial_{trial}.{extension}")
             saved_results = {path: path.read_bytes() for path in output_dir.glob("*.pkl")}
             with patch.object(Robot2DMotionMDP, "deploy_policy", side_effect=AssertionError):
                 plot_comparison()

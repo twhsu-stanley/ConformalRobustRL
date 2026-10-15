@@ -125,8 +125,8 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(third["R_hat_next"], 0.4)
         self.assertEqual(second["R_used"], first["R_hat_next"])
         self.assertEqual(third["R_used"], second["R_hat_next"])
-        self.assertEqual(controller.calibrator.n_updates, 3)
-        self.assertAlmostEqual(controller.calibrator.delta_k, 0.06)
+        self.assertEqual(controller.acp.n_updates, 3)
+        self.assertAlmostEqual(controller.acp.delta_k, 0.06)
 
     def test_pilot_scores_do_not_enter_R_counts(self):
         controller = self.controller(calibration_scores=None, pilot_episodes=3)
@@ -143,7 +143,7 @@ class ControllerTests(unittest.TestCase):
             mdp, horizon=6, training_episodes=200, calibration_scores=[0] * 5,
             R_hat_init=0, delta=0.2, eta=0.1, seed=2,
         )
-        controller.calibrator.delta_k = 1.1
+        controller.acp.delta_k = 1.1
         record = controller.run_episode()
         self.assertTrue(record["goal_reached"])
         self.assertEqual(record["episode_length"], 2)
@@ -154,23 +154,61 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(record["C_hat"], 0)
         self.assertEqual(record["C_used"], 0)
         self.assertEqual(record["miscoverage"], 0)
-        self.assertEqual(record["planned_miscoverage"], 0)
 
     def test_fixed_radius_is_validated_and_passed_directly_to_training(self):
         for C in (0.0, 1.0, np.inf):
             with self.subTest(C=C):
                 controller = self.controller(C=C, training_episodes=10)
                 record = controller.run_episode()
-                self.assertEqual(record["C_hat"], C)
+                self.assertNotIn("C_hat", record)
                 self.assertEqual(record["C_used"], C)
                 self.assertEqual(controller.agent.C, C)
-                self.assertEqual(controller.calibrator.n_updates, 0)
+                self.assertIsNone(controller.acp)
         for C in (np.nan, -0.1):
             with self.subTest(C=C):
                 controller = self.controller(C=0.0, training_episodes=10)
                 controller.fixed_C = C
                 with self.assertRaises(ValueError):
                     controller.run_episode()
+
+    def test_R_and_C_independently_control_updates_and_policy_reuse(self):
+        for R, C in ((None, None), (0.3, None), (None, 0.7), (0.3, 0.7)):
+            with self.subTest(R=R, C=C):
+                controller = self.controller(R=R, C=C, training_episodes=20)
+                first = controller.run_episode()
+                first_agent = controller.agent
+                second = controller.run_episode()
+                self.assertFalse(hasattr(controller, "method"))
+                self.assertEqual(second["training_reused"], R is not None and C is not None)
+                if R is not None and C is not None:
+                    self.assertIs(controller.agent, first_agent)
+                else:
+                    self.assertIsNot(controller.agent, first_agent)
+                if R is None:
+                    count = first["episode_length"] + second["episode_length"]
+                    self.assertEqual(second["transition_count"], count)
+                    mismatches = first["episode_mismatches"] + second["episode_mismatches"]
+                    self.assertEqual(second["mismatch_count"], mismatches)
+                    self.assertEqual(second["R_used"], first["R_hat_next"])
+                    self.assertAlmostEqual(controller.R_hat, mismatches / count)
+                else:
+                    self.assertEqual(second["R_used"], R)
+                    self.assertIsNone(controller.R_hat)
+                    self.assertEqual(controller.transition_count, 0)
+                    self.assertEqual(controller.mismatch_count, 0)
+                    self.assertNotIn("R_hat_next", second)
+                    self.assertNotIn("transition_count", second)
+                    self.assertNotIn("mismatch_count", second)
+                if C is None:
+                    self.assertEqual(controller.acp.n_updates, 2)
+                    self.assertEqual(second["C_used"], second["C_hat"])
+                    self.assertEqual(controller.acp.scores[-1], second["score"])
+                else:
+                    self.assertEqual(second["C_used"], C)
+                    self.assertIsNone(controller.acp)
+                    self.assertFalse(controller.pilot_scores)
+                    self.assertNotIn("C_hat", second)
+                    self.assertNotIn("miscoverage", second)
 
     def test_seeded_controllers_repeat_the_same_run(self):
         mdp = Robot2DMotionMDP(

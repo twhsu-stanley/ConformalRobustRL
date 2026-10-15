@@ -75,23 +75,24 @@ def plot_robot_2d_tabular(mdp, agent, *, show=True):
 
 
 def plot_conformal_history(history, delta):
-    """Plot C_hat coverage and coverage of C_used after method overrides."""
+    """Plot deployment uncertainty, showing estimation and ACP only when enabled."""
     if not history:
         raise ValueError("At least one deployment episode is required for plotting.")
-    fig, axes = plt.subplots(3, 2, figsize=(12, 11), constrained_layout=True)
+    has_acp = "C_hat" in history[0]
+    fig, axes = plt.subplots(3 if has_acp else 2, 2, figsize=(12, 11 if has_acp else 7),
+                             constrained_layout=True)
     episodes = np.arange(1, len(history) + 1)
     axes = axes.ravel()
     axes[0].plot(episodes, [item["R_used"] for item in history], label="R used for training")
-    axes[0].plot(
-        episodes, [item["R_hat_next"] for item in history], label="Updated mismatch estimate",
-    )
-    axes[0].set(title="Discrete transition mismatches", ylabel="Probability", ylim=(0, 1))
+    if "R_hat_next" in history[0]:
+        axes[0].plot(episodes, [item["R_hat_next"] for item in history], label="Updated R estimate")
+    axes[0].set(title="Planning R", ylabel="Probability", ylim=(0, 1))
     scores = np.asarray([item["score"] for item in history])
-    radii = np.asarray([item["C_hat"] for item in history])
+    radii = np.asarray([item["C_used"] for item in history])
     finite_radii = np.where(np.isfinite(radii), radii, np.nan)
     ceiling = max(1.0, np.max(scores), np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
     axes[1].plot(episodes, scores, label="Episode maximum deviation")
-    axes[1].plot(episodes, finite_radii, label="Conformal radius")
+    axes[1].plot(episodes, finite_radii, label="Conformal radius" if has_acp else "Fixed radius")
     if "C_star_k" in history[0]:
         support_bounds = [item["C_star_k"] for item in history]
         axes[1].plot(episodes, support_bounds, "k:", label="True C*")
@@ -102,28 +103,28 @@ def plot_conformal_history(history, delta):
             marker="^", label="Unbounded prediction",
         )
     axes[1].set(title="Continuous uncertainty", ylabel="Distance")
-    axes[2].plot(episodes, [item["delta_k"] for item in history], label="Adaptive delta")
-    axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
-    axes[2].set(title="ACP update", ylabel="Failure parameter")
-    miscoverage = np.asarray([item["miscoverage"] for item in history])
-    planned = np.asarray([item["planned_miscoverage"] for item in history])
-    axes[3].plot(episodes, 1 - np.cumsum(miscoverage) / episodes, label="Conformal coverage")
-    axes[3].plot(episodes, 1 - np.cumsum(planned) / episodes, label="Planning-radius coverage")
-    axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
-    axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
+    if has_acp:
+        axes[2].plot(episodes, [item["delta_k"] for item in history], label="Adaptive delta")
+        axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
+        axes[2].set(title="ACP update", ylabel="Failure parameter")
+        miscoverage = np.asarray([item["miscoverage"] for item in history])
+        axes[3].plot(episodes, 1 - np.cumsum(miscoverage) / episodes, label="Conformal coverage")
+        axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
+        axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
+    returns_axis, residual_axis = axes[-2:]
     returns = [item["discounted_return"] for item in history]
-    axes[4].plot(episodes, returns, label="Discounted r(s,a)")
+    returns_axis.plot(episodes, returns, label="Discounted r(s,a)")
     for key, marker, color in (
         ("goal_reached", "o", "green"), ("collision", "x", "red"),
         ("workspace_exit", "x", "purple"),
     ):
         indices = np.flatnonzero([item[key] for item in history])
-        axes[4].scatter(episodes[indices], np.asarray(returns)[indices], marker=marker,
-                        color=color, label=key.replace("_", " "))
-    axes[4].set(title="Deployment outcomes", ylabel="Return")
+        returns_axis.scatter(episodes[indices], np.asarray(returns)[indices], marker=marker,
+                             color=color, label=key.replace("_", " "))
+    returns_axis.set(title="Deployment outcomes", ylabel="Return")
     residuals = [max(item["training"]["bellman_residual"], 1e-15) for item in history]
-    axes[5].semilogy(episodes, residuals, label="Robust Bellman residual")
-    axes[5].set(title="Finite training accuracy", ylabel="Residual")
+    residual_axis.semilogy(episodes, residuals, label="Robust Bellman residual")
+    residual_axis.set(title="Finite training accuracy", ylabel="Residual")
     for axis in axes:
         axis.set_xlabel("Deployment episode")
         axis.grid(alpha=0.25)

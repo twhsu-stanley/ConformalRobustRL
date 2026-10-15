@@ -25,9 +25,9 @@ python -m robot_2d.main_robot_2d_online
 python -m robot_2d.plot_online_comparison
 ```
 
-The settings at the bottom of `robot_2d/main_robot_2d_online.py` run four methods
-for seeds `(87,)`, with 100 outer episodes, 4,000 inner training episodes per
-training call and 100 pilot episodes.
+The settings at the bottom of `robot_2d/main_robot_2d_online.py` currently run proposed
+and nominal policies for seeds `(23,)`, with 40 outer episodes, 5,000 inner training
+episodes per call, and 200 pilot episodes for ACP.
 All online results and figures go to `robot_2d/saved_results/online/`.
 Each call to `main()` saves one file named
 `results_{method}_R{R}_C{C}_trial_{trial}.pkl`. Seeds are stored in the data.
@@ -68,14 +68,14 @@ These continuation calls do not rewrite the files previously saved by `main()`.
 | --- | --- | --- | --- |
 | `proposed` | Cumulative mismatch estimate | Pre-episode ACP radius | Fresh zero Q-table each episode |
 | `nominal` | 0 | 0 | Train once per trial and reuse the policy |
-| `R_contamination_0.1` | Fixed at 0.1 | Positive infinity | Fresh zero Q-table each episode |
-| `R_contamination_0.3` | Fixed at 0.3 | Positive infinity | Fresh zero Q-table each episode |
+| `R_contamination_0.1` | Fixed at 0.1 | Positive infinity | Train once per trial and reuse the policy |
+| `R_contamination_0.3` | Fixed at 0.3 | Positive infinity | Train once per trial and reuse the policy |
 
 The two R-contamination methods implement the globally supported comparison
 associated with [Wang and Zou, NeurIPS 2021](https://proceedings.neurips.cc/paper/2021/file/3a4496776767aaa99f9804d0905fe584-Paper.pdf).
 Using `np.inf` includes all 101 next states on the configured 10-by-10 grid:
 100 grid states and the exit state. Their planning R stays fixed at 0.1 or 0.3
-throughout deployment. Observed mismatch estimates are still recorded as diagnostics.
+throughout deployment. They collect raw deployment observations without estimating R.
 
 ```python
 controller = main(mdp=mdp, method='proposed', R=None, C=None, save_plots=False)
@@ -85,13 +85,24 @@ controller = main(mdp=mdp, method='R_contamination_0.3', save_plots=False)
 controller = main(mdp=mdp, method='proposed', R=0.2, C=0.7, save_plots=False)
 ```
 
-`R=None` uses the cumulative estimate for planning; numeric R holds the planning
-parameter fixed while mismatch observations continue to be recorded. `C=None`
-uses ACP; numeric C holds the radius fixed and disables the adaptive failure
-parameter update while retaining observed scores. Method overrides take priority:
+`main_robot_2d_online.py` owns the method settings and passes only R/C to the controller.
+The controller has no method argument or method-specific behavior. `R=None` enables
+cumulative mismatch counting and estimation; numeric R fixes the planning parameter
+and disables that estimator. `C=None` enables pilots and ACP; numeric C, including
+infinity, fixes the radius and disables all calibration. These choices are independent:
+
+| R input | C input | R estimation | ACP | Training |
+| --- | --- | --- | --- | --- |
+| `None` | `None` | Enabled | Enabled | Retrain each episode |
+| Numeric | `None` | Disabled | Enabled | Retrain each episode |
+| `None` | Numeric | Enabled | Disabled | Retrain each episode |
+| Numeric | Numeric | Disabled | Disabled | Train once and reuse on the fixed MDP |
+
+Method overrides occur only in `main_robot_2d_online.py`:
 nominal planning always uses R=C=0; the two R-contamination methods always use
 their named fixed R and C=infinity, regardless of supplied R/C arguments.
-With `C=None`, ACP diagnostics are still collected for all baseline methods.
+Proposed runs with `C=None` initialize and update ACP. Baselines skip calibration pilots,
+ignore calibration inputs, and save no ACP fields or uncertainty-history figure.
 
 | Argument to `main()` | Default | Meaning |
 | --- | --- | --- |
@@ -111,23 +122,24 @@ With `C=None`, ACP diagnostics are still collected for all baseline methods.
 | `shift_period` | 100 | Number of episodes in one support-bound cycle |
 | `seed` | 7 | Random seed for a single run |
 | `trial` | 1 | Trial number used in the saved filename |
-| `save_plots` | `True` | Save the two single-run figures |
+| `save_plots` | `True` | Save the final policy figure and any active uncertainty history |
 | `verbose` | `True` | Print episode progress and the saved path |
 
-The script entry point runs all four methods for seeds `(87,)`.
+The script entry point selects methods and seeds at the bottom of the file.
 It calls `main()` once per method and trial;
-each call saves its own file. The script explicitly sets 100 pilots; calling `main()`
+each call saves its own file. The script explicitly sets 200 pilots; calling `main()`
 without that override uses the 20-pilot function default.
 
-Within each comparison trial, methods share the initial pilot calibration scores.
-Each method maintains its own subsequent R estimate and calibration history.
+Within each comparison trial, proposed runs estimate R when `R=None` and collect
+calibration scores when `C=None`. Baselines perform neither update.
 Simulation draws ordinary random disturbances, with separate run seeds for the
 methods. No disturbance tapes are used. The stored
 run seed is `seed + 100000 * method_index` in the requested method order.
-Each trial generates one ten-obstacle map from its base seed before running any
+Each trial generates one obstacle map from its base seed before running any
 method. The map stays fixed for all pilots, online episodes, and methods in that
 trial. A new trial generates its own map. All methods share the same support
 schedule and true R-star, while retaining distinct training/deployment seeds.
+The script currently requests 20 obstacle cells; the map generator defaults to 10.
 For separate calls to `main()`, pass the same prepared MDP and matching `shift_period`.
 `main()` preserves the supplied map, and continuing a controller keeps that map.
 
@@ -137,6 +149,8 @@ under the deployment noise law and records each episode's maximum disturbance no
 Only these scores initialize ACP; pilot transitions never enter the online R estimate
 or the policy performance comparison. Supplying `calibration_scores` skips pilots,
 and `pilot_episodes=0` is allowed when those scores are supplied.
+Calibration settings apply only when `C=None`, including when R is fixed.
+Fixed C needs no calibration scores or pilots, including when R is adaptive.
 
 Seeds control reproducibility of simulated randomness and are optional: `seed=None`
 uses fresh randomness. The fixed-R/C runner seeds each trial's Q-learning agent;
@@ -257,11 +271,13 @@ training/deployment episode. It also runs during continuation.
 `Robot2DMotionMDP.deploy_policy()` is the single continuous rollout routine shared
 by random-policy pilots and online deployment.
 Robot-specific dynamics and plotting remain under `robot_2d/`.
+Method names, default R/C inputs, and display labels are defined together in
+`METHOD_SETTINGS` in `main_robot_2d_online.py`; the comparison plotter reads that table.
 
 Names follow the paper: `R_hat` is the current estimate, `R_hat_next` is its
 post-episode update, `C_hat` is the ACP prediction, and `R_star`/`C_star_k` describe
 simulator truth. `R_used` and `C_used` are the actual Algorithm 1 inputs after
-method overrides. `delta` is the fixed ACP target, `delta_1` its initial parameter,
+runner configuration. `delta` is the fixed ACP target, `delta_1` its initial parameter,
 and `delta_k`/`delta_next` its adaptive values before/after the episode update.
 The MDP uses `start_state`, `goal_state`, and `exit_state`.
 
@@ -277,17 +293,17 @@ explicitly, including when adapting a bare Gym environment such as FrozenLake.
 For each online episode:
 
 1. Set the episode's physical disturbance law while keeping the trial map fixed.
-2. Predict the conformal radius using scores available before deployment, and
-   select the pre-episode R estimate.
+2. Use the R estimate when R is adaptive, otherwise fixed R. Use the ACP prediction
+   when C is adaptive, otherwise fixed C.
 3. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C;
-   the nominal baseline reuses its policy after the first training call.
+   runs with both inputs fixed reuse their policy after the first training call.
 4. Deploy until a terminal condition or the step limit, recording every landing,
    reward, mismatch, and disturbance, including the final transition.
-5. Update R as total discrete mismatches divided by total online transitions.
-6. Compute the maximum continuous deviation over the episode, score the
-   pre-episode prediction, and update ACP and its score window.
+5. If R is adaptive, update it as cumulative mismatches divided by cumulative transitions.
+6. If C is adaptive, score the maximum continuous deviation against the pre-episode
+   prediction and update ACP and its score window.
 
-Pilot transitions never enter the R estimator. All actual online transitions enter R.
+Pilot transitions never enter the R estimator. With adaptive R, all online transitions enter it.
 The calibration window applies only to C scores; R uses the entire online history.
 The step limit ensures a finite episode length, as required by Assumption 6;
 episodes contain at least one transition and need not have a common length.
@@ -296,7 +312,7 @@ Exploring starts cycle through shuffled nonterminal state-action pairs. The
 controller uses learning rate 0.5 for the first 100,000 training transitions,
 then per-pair harmonic decay. Its epsilon schedule starts at 1.0, decays by 0.995
 per training episode, and has a floor of 0.1. All changing planning problems use
-fresh zero Q-tables. The nominal baseline trains once on the fixed trial map.
+fresh zero Q-tables. All fixed-input runs train once on the fixed trial map.
 Finite Q-learning approximates the robust optimum; inspect saved Bellman residuals
 and unvisited pairs when selecting a common training budget across methods.
 
@@ -309,12 +325,8 @@ Its paths are fixed relative to the script. It does not run the robot or retrain
 
 ### R estimation: `r_estimation`
 
-The first panel shows individual seed estimates, their mean, and the common true R-star.
-The second shows each seed's absolute estimation error against its own cumulative
-transition count tau_k, together with the simultaneous bound from Lemma 5:
-`sqrt(log(2*tau_k*(tau_k+1)/delta_R)/(2*tau_k))`.
-`plot_comparison(delta_R=0.05)` sets its confidence parameter. The bound
-applies to each run; it is not a joint confidence statement across seeds.
+The single panel shows individual seed estimates, their mean, and the common true R-star
+against deployment episode k.
 
 The new experiment has true R-star exactly equal to `R_star`, default 0.2.
 Every nonzero axis disturbance leaves the nominal unit cell, including for goal,
@@ -366,8 +378,9 @@ nonnegative `C_hat` directly: nonpositive ranks return zero, and ranks above N r
 positive infinity. These tail-rank conventions are implementation choices not specified
 in Algorithm 2 of the draft. A zero score is covered by a zero radius. Fixed C is
 validated and converted when selected; there is no separate planning-radius function.
-The plot marks unbounded predictions and shows `C_used` coverage when method overrides
-make it differ from `C_hat` coverage. Infinite radii are retained in saved data.
+The plot marks unbounded predictions. With adaptive C, `C_used` equals `C_hat`,
+so conformal coverage and planning-radius coverage are identical and recorded once.
+Infinite radii are retained in saved data.
 A calibrated radius need not equal that episode's true support bound.
 
 For adaptive runs, the exact bookkeeping identity after K episodes is:
@@ -403,9 +416,10 @@ the deployment episode number. Each trajectory connects its recorded continuous
 positions through its final landing; workspace exits remain visible outside the grid.
 These figures are saved as `trajectories_{method}_R{R}_C{C}_trial_{trial}.png` and `.pdf`.
 
-The R and ACP figures use runs labeled `proposed`.
-Single-run `main(save_plots=True)` saves `online_uncertainty_{test}.png` and
-`final_policy_{test}.png`, where `{test}` is the method, R/C setting, and trial.
+The R and ACP figures use runs with their corresponding component enabled.
+Single-run `main(save_plots=True)` saves `final_policy_{test}.png` for every method
+and `online_uncertainty_{test}.png` when either component is adaptive, where `{test}` is the method,
+R/C setting, and trial.
 
 ## Distribution shifts with a fixed true R
 
@@ -451,25 +465,26 @@ independently of the working directory. Each `main()` call saves one results dic
 in `results_{method}_R{R}_C{C}_trial_{trial}.pkl`. For example:
 
 - `results_proposed_RNone_CNone_trial_1.pkl`: online R estimation and ACP.
-- `results_nominal_RNone_CNone_trial_1.pkl`: nominal baseline.
-- `results_R_contamination_0.1_RNone_CNone_trial_1.pkl`: fixed-R=0.1 contamination baseline.
-- `results_R_contamination_0.3_RNone_CNone_trial_1.pkl`: fixed-R=0.3 contamination baseline.
+- `results_nominal_R0.0_C0.0_trial_1.pkl`: nominal baseline.
+- `results_R_contamination_0.1_R0.1_Cinf_trial_1.pkl`: fixed-R=0.1 contamination baseline.
+- `results_R_contamination_0.3_R0.3_Cinf_trial_1.pkl`: fixed-R=0.3 contamination baseline.
 - `results_proposed_R0.2_C0.7_trial_1.pkl`: fixed R/C experiment.
 
-`None` in the filename denotes an unspecified planning parameter; method overrides
-still determine nominal and R-contamination planning. The comparison plotter uses the fixed
-pattern `results_{method}_RNone_CNone_trial_*.pkl` for each of the four methods,
-including all matching trials. Edit those patterns in the plotter to select other tests.
+Filenames and saved `fixed_R`/`fixed_C` use the actual inputs passed to the controller.
+`None` identifies an adaptive component. The comparison plotter uses each method's
+default R/C from `METHOD_SETTINGS` to locate matching trial files. Other parameter
+experiments retain their own filenames.
 
-Each run record contains settings, the configured MDP, initial and pilot scores,
-final R and ACP parameter, full online histories, final Q/policy, state-action
-visit counts.
+Each run record contains settings, the configured MDP, full online histories,
+final Q/policy, and state-action visit counts. Adaptive R saves `final_R`; adaptive C
+saves ACP settings, initial and pilot scores, and the final adaptive parameter.
 Q has shape `(101, 4)` and policy has shape `(101,)` on the
 configured online grid; the exit row is zero. The fixed obstacle map is saved once
-in the MDP. Each history records `C_star_k`, `R_used`, `R_hat_next`, `C_hat`, `C_used`,
-score, miscoverage, `delta_k`, `delta_next`, cumulative
-counts, training diagnostics, original deviation vectors, continuous positions,
+in the MDP. Each history records `C_star_k`, `R_used`, `C_used`,
+the maximum deviation score, training diagnostics, original deviation vectors, continuous positions,
 extended-grid quantized positions, episode length, and terminal outcome.
+Adaptive R adds `R_hat_next`, `transition_count`, and `mismatch_count`.
+Adaptive C adds `C_hat`, `miscoverage`, `delta_k`, and `delta_next`.
 `states` and `positions` contain the initial observation followed by each actual
 landing, including the terminal landing; they have length `episode_length + 1`.
 The disturbance, action, reward, and mismatch arrays have length `episode_length`.
@@ -497,6 +512,8 @@ Results from previous projected, padded, or resetting deployments require rerunn
 to produce the current terminal episodes, transition counts, and trajectory fields.
 Runs from the former changing-map experiment must also be regenerated for this comparison.
 Saved files using the previous attribute and result-key names must be regenerated.
+Baseline files using the former `RNone_CNone` suffix must be regenerated under their
+actual fixed R/C filenames for the updated comparison.
 
 ## Algorithm 1 alone and its learning curves
 
