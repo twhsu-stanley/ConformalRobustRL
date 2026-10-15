@@ -10,7 +10,7 @@ import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.main_robot_2d_online import main
-from robot_2d.online_settings import randomize_obstacles
+from robot_2d.utils import randomize_obstacles
 from robot_2d.plot_online_comparison import mismatch_probabilities
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 

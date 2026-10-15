@@ -43,7 +43,7 @@ for a single run. For example:
 from robot_2d.main_robot_2d_online import main
 from robot_2d.plot_online_comparison import plot_comparison
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.online_settings import randomize_obstacles
+from robot_2d.utils import randomize_obstacles
 import numpy as np
 
 # Run Algorithm 2 alone.
@@ -187,7 +187,7 @@ nominal function f(s,a) is unchanged on the original grid states, including outw
 commands that remain in the current cell. The failure row has zero value and reward.
 Edit the direct `Robot2DMotionMDP` construction in the main scripts to change
 bounds, grid, start/goal, or rewards. Online obstacle placement is handled in
-`robot_2d/online_settings.py`.
+`robot_2d/main_robot_2d_online.py`.
 
 Section III defines the nominal dynamics as `F(x,a)=f(Phi(x),a)`:
 the action targets the neighboring cell center even when the current continuous
@@ -493,7 +493,7 @@ Trajectory plots connect these successive positions directly.
 Single-run figures use the same method, R/C, and trial suffix as the results file.
 Comparison figures are `r_estimation`, `acp_calibration`, and `policy_comparison`,
 plus one `trajectories_{method}_R{R}_C{C}_trial_{trial}` figure per loaded run.
-Each is saved in PNG and PDF format in the same folder as the result files.
+Each is saved in PNG format in the same folder as the result files.
 
 ```python
 import pickle
