@@ -122,10 +122,10 @@ if __name__ == "__main__":
         x_max=10.0, y_max=10.0, grid_shape=(10, 10),
         obstacles=[
             (0, 7), (0, 8), (0, 9),
-            (1, 9), 
+            (1, 8), (1, 9), 
             (2, 9),
             (4, 1), (4, 3), (4, 4), 
-            (5, 0), (5, 1), (5, 3), (5, 4), (5, 5), (5, 6),
+            (5, 0), (5, 1), (5, 3), (5, 4), (5, 5), (5, 6), (5, 9),
             (6, 0), (6, 3), (6, 4), 
             (8, 0), (8, 1), (8, 4), (8, 9),
             (9, 3), (9, 4), (9, 5), (9, 8), (9, 9) 
@@ -135,7 +135,7 @@ if __name__ == "__main__":
 
     seeds = (23,)
     methods = ("proposed", "nominal")#, "R_contamination_0.1", "R_contamination_0.3")
-    n_deployment_episodes = 5
+    n_deployment_episodes = 20
     training_episodes = 5000
     pilot_episodes = 100
     R_star = 0.4
