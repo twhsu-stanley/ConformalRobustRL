@@ -12,7 +12,7 @@ if not __package__:
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils import C_star_shift, randomize_obstacles, sample_deviation
+from robot_2d.utils import C_star_shift, sample_deviation
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -40,7 +40,7 @@ def main(
     a fixed disturbance law whose support bound varies slowly within [0.5, 2.0],
     while R_star stays constant.
     These true simulator parameters are not supplied to the Q-learning agent.
-    The trial loop generates one map and passes it to every method. Matching
+    The trial loop passes the fixed map to every method and trial. Matching
     shift_period gives methods the same support schedule even when pilots are skipped.
     """
     if method not in METHOD_SETTINGS:
@@ -120,27 +120,29 @@ def main(
 if __name__ == "__main__":
     mdp = Robot2DMotionMDP(
         x_max=10.0, y_max=10.0, grid_shape=(10, 10),
-        obstacles=[],
+        obstacles=[
+            (2, 4), (2, 5), (2, 6), (2, 8), (2, 9),
+            (3, 4), (3, 5), (3, 6), (3, 8), (3, 9),
+            (8, 0), (8, 1), (8, 2), (8, 3), (8, 4),
+            (9, 0), (9, 1), (9, 2), (9, 3), (9, 4),
+        ],
         start_cell=(1, 1), goal_cell=(8, 8), movement_reward=0.0, goal_reward=1.0,
     )
 
     seeds = (23,)
     methods = ("proposed", "nominal")#, "R_contamination_0.1", "R_contamination_0.3")
-    n_deployment_episodes = 2
+    n_deployment_episodes = 100
     training_episodes = 5000
     pilot_episodes = 100
-    R_star = 0.45
-    shift_period = 60
-    n_obstacles = 10
+    R_star = 0.44
+    shift_period = 200
 
     for trial, seed in enumerate(seeds, 1):
-        mdp.set_obstacles([])
-        randomize_obstacles(mdp, np.random.default_rng(seed), n_obstacles)
         for index, method in enumerate(methods):
             main(
                 mdp=mdp, gamma=0.9, method=method, seed=seed + 100000 * index,
                 trial=trial, save_plots=False,
                 n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
-                eta=0.1, calibration_window=200, pilot_episodes=pilot_episodes, quantile_max = 3.0,
+                eta=0.05, calibration_window=100, pilot_episodes=pilot_episodes, quantile_max = 3.0,
                 R_star=R_star, shift_period=shift_period,
             )
