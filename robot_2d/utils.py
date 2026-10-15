@@ -9,7 +9,7 @@ def C_star_shift(episode, period=100):
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
     phase = (episode % period + 0.5) / period
-    return float(0.5 + 1.5 * np.cos(np.pi * phase)**2)
+    return float(0.5 + 1.0 * np.cos(np.pi * phase)**2)
 
 
 def sample_deviation(nominal_position, rng, *, radius, R_star):

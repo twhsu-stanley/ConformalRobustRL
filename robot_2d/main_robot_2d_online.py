@@ -121,20 +121,24 @@ if __name__ == "__main__":
     mdp = Robot2DMotionMDP(
         x_max=10.0, y_max=10.0, grid_shape=(10, 10),
         obstacles=[
-            (2, 4), (2, 5), (2, 6), (2, 8), (2, 9),
-            (3, 4), (3, 5), (3, 6), (3, 8), (3, 9),
-            (8, 0), (8, 1), (8, 2), (8, 3), (8, 4),
-            (9, 0), (9, 1), (9, 2), (9, 3), (9, 4),
+            (0, 7), (0, 8), (0, 9),
+            (1, 9), 
+            (2, 9),
+            (4, 1), (4, 3), (4, 4), 
+            (5, 0), (5, 1), (5, 3), (5, 4), (5, 5), (5, 6),
+            (6, 0), (6, 3), (6, 4), 
+            (8, 0), (8, 1), (8, 4), (8, 9),
+            (9, 3), (9, 4), (9, 5), (9, 8), (9, 9) 
         ],
-        start_cell=(1, 1), goal_cell=(8, 8), movement_reward=0.0, goal_reward=1.0,
+        start_cell=(1, 1), goal_cell=(7, 6), movement_reward=0.0, goal_reward=1.0,
     )
 
     seeds = (23,)
     methods = ("proposed", "nominal")#, "R_contamination_0.1", "R_contamination_0.3")
-    n_deployment_episodes = 100
+    n_deployment_episodes = 5
     training_episodes = 5000
     pilot_episodes = 100
-    R_star = 0.44
+    R_star = 0.4
     shift_period = 200
 
     for trial, seed in enumerate(seeds, 1):
