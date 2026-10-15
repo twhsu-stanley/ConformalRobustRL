@@ -134,11 +134,12 @@ def plot_conformal_history(history, delta):
     if "R_hat_next" in history[0]:
         axes[0].plot(episodes, [item["R_hat_next"] for item in history], label="Updated R estimate")
     axes[0].set(title="Planning R", ylabel="Probability", ylim=(0, 1))
-    scores = np.asarray([item["score"] for item in history])
+    scores = np.asarray([item["score"] for item in history], dtype=float)
     radii = np.asarray([item["C_used"] for item in history])
     finite_radii = np.where(np.isfinite(radii), radii, np.nan)
-    ceiling = max(1.0, np.max(scores), np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
-    axes[1].plot(episodes, scores, label="Episode maximum deviation")
+    ceiling = max(1.0, np.nanmax(scores, initial=0),
+                  np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
+    axes[1].plot(episodes, scores, label="Maximum nonterminal deviation")
     axes[1].plot(episodes, finite_radii, label="Conformal radius" if has_acp else "Fixed radius")
     if "C_star_k" in history[0]:
         support_bounds = [item["C_star_k"] for item in history]
@@ -154,8 +155,11 @@ def plot_conformal_history(history, delta):
         axes[2].plot(episodes, [item["delta_k"] for item in history], label="Adaptive delta")
         axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
         axes[2].set(title="ACP update", ylabel="Failure parameter")
-        miscoverage = np.asarray([item["miscoverage"] for item in history])
-        axes[3].plot(episodes, 1 - np.cumsum(miscoverage) / episodes, label="Conformal coverage")
+        miscoverage = np.asarray([item["miscoverage"] for item in history], dtype=float)
+        miscoverage = np.ma.masked_invalid(miscoverage)
+        counts = (~np.ma.getmaskarray(miscoverage)).cumsum()
+        coverage = 1 - np.ma.divide(miscoverage.filled(0).cumsum(), counts)
+        axes[3].plot(episodes, coverage, label="Conformal coverage")
         axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
         axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
     returns_axis, residual_axis = axes[-2:]

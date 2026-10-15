@@ -14,6 +14,7 @@ class ConformallyRobustController:
     and deploy_policy(). Only actual deployment transitions enter the mismatch
     estimate; pilot calibration does not. Episodes stop at a terminal condition,
     with horizon acting as a step limit. R uses the observed transition count tau_k.
+    ACP scores exclude terminal transitions; episodes without a score skip ACP.
 
     R=None enables mismatch counting and estimation; numeric R disables them.
     C=None enables pilots and ACP; numeric C disables them, including C=infinity.
@@ -99,7 +100,8 @@ class ConformallyRobustController:
             if self.episode_setup is not None:
                 self.episode_setup(self, episode)
             record = self.deployment_env.deploy_policy(random_policy, self.gamma)
-            self.pilot_scores.append(record["score"])
+            if record["score"] is not None:
+                self.pilot_scores.append(record["score"])
         self.acp = ACP(self.pilot_scores, **self.acp_options)
         self.initial_calibration_scores = list(self.acp.scores)
 
@@ -137,7 +139,11 @@ class ConformallyRobustController:
                 "mismatch_count": self.mismatch_count,
             })
         if self.fixed_C is None:
-            update = self.acp.update(record["score"], predicted_radius=C_used)
+            update = {
+                "miscoverage": None, "delta_k": self.acp.delta_k, "delta_next": self.acp.delta_k,
+            }
+            if record["score"] is not None:
+                update = self.acp.update(record["score"], predicted_radius=C_used)
             record.update({"C_hat": float(C_used), **update})
         record.update(settings)
         self.history.append(record)

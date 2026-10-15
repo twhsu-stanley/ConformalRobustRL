@@ -5,9 +5,13 @@ Algorithm 1 learns a tabular robust Q-function from the nominal simulator.
 Algorithm 2 deploys the policy, estimates the discrete mismatch probability R,
 and uses adaptive conformal prediction (ACP) to calibrate a continuous deviation
 radius C. Q-learning starts from zero; the transformer/LLM warm start is not implemented.
-Deployment records unprojected noisy transitions until goal arrival, obstacle
-collision, workspace exit, or the episode step limit. Episode lengths may vary;
-the final transition contributes to both R estimation and the episode C score.
+Deployment samples unprojected noisy endpoints and checks each straight transition
+segment for obstacle or goal contact using grid traversal. The first contact ends
+the episode and sets the recorded terminal state and position to the contact marker.
+The sampled endpoint remains recoverable as nominal position plus sampled deviation;
+it determines the discrete mismatch, including on the terminal transition.
+Episode lengths may vary. Terminal transitions enter R estimation but not the ACP
+score; a nonterminal transition at the episode step limit still enters the score.
 
 ## Setup and run the comparison
 
@@ -117,7 +121,7 @@ ignore calibration inputs, and save no ACP fields or uncertainty-history figure.
 | `eta` | 0.01 | ACP update step size |
 | `calibration_window` | 100 | Maximum number of stored calibration scores |
 | `pilot_episodes` | 20 | Random-policy pilots when scores are not supplied |
-| `calibration_scores` | `None` | Optional initial episode maximum deviations |
+| `calibration_scores` | `None` | Optional initial maxima of nonterminal deviations |
 | `R_star` | 0.2 | Fixed true mismatch probability in the simulator |
 | `shift_period` | 100 | Number of episodes in one support-bound cycle |
 | `seed` | 7 | Random seed for a single run |
@@ -145,7 +149,9 @@ For separate calls to `main()`, pass the same prepared MDP and matching `shift_p
 
 `pilot_episodes` supplies the initial calibration dataset S_cal required by Algorithm 2.
 When `calibration_scores` is absent, the robot runs this many random-policy episodes
-under the deployment noise law and records each episode's maximum disturbance norm.
+under the deployment noise law and records each episode's maximum nonterminal
+disturbance norm. A pilot that terminates on its first transition supplies no score
+and is skipped. An observed zero deviation remains a valid calibration score.
 Only these scores initialize ACP; pilot transitions never enter the online R estimate
 or the policy performance comparison. Supplying `calibration_scores` skips pilots,
 and `pilot_episodes=0` is allowed when those scores are supplied.
@@ -211,23 +217,27 @@ and performs:
 s = discretize(x)
 a = policy[s]
 Delta = sample_from_unknown_distribution()
-x_observed = F(x,a) + Delta
-s_observed = discretize(x_observed)
-# Record the transition, including its mismatch and the original Delta.
-x = x_observed
-# End the episode at a goal, obstacle, workspace exit, or the step limit.
+x_sampled = F(x,a) + Delta
+s_sampled = discretize(x_sampled)
+mismatch = (s_sampled != f(s,a))
+contact = mdp._collision_check_segment(x, x_sampled)
+s, x = (s_sampled, x_sampled) if contact is None else contact
+# Record the transition, including its endpoint-based mismatch and original Delta.
+# End at a contact, workspace exit, or step limit; exclude terminal Delta from ACP.
 ```
 
 The online experiment uses the shifting axis-disturbance law described below.
 The sampled vector is neither projected nor
-resampled, including when it leaves the workspace. The final position, original
-vector, and norm are recorded before checking the terminal condition. There are
+resampled, including when it leaves the workspace. The final position marks the
+first obstacle or goal contact when present. The original vector and norm remain
+recorded even on this terminal transition, but are excluded from the ACP score. There are
 no subsequent transitions from terminal states and no padding to the step limit.
 R, C, and the policy stay fixed within each episode. Training uses a separate
 noise-free episodic clone. The physical noise law is not supplied to the learner.
 
 The exit outcome implements the symbolic `s_out` in Section III. Outside landings
-retain their original continuous coordinates and share this zero-valued planning state.
+without an earlier obstacle or goal contact retain their original continuous
+coordinates and share this zero-valued planning state.
 Episode resets reject goal, obstacle, and exit states, whether supplied as a state index
 or a continuous position. Every episode begins at a nonterminal state.
 A custom `noise_sampler(nominal_position, rng)` can return a bounded 2-D disturbance.
@@ -297,11 +307,14 @@ For each online episode:
    when C is adaptive, otherwise fixed C.
 3. Train Algorithm 1 from zero on the nominal simulator with the chosen R and C;
    runs with both inputs fixed reuse their policy after the first training call.
-4. Deploy until a terminal condition or the step limit, recording every landing,
-   reward, mismatch, and disturbance, including the final transition.
+4. Deploy until a segment contacts an obstacle or goal, the endpoint exits the
+   workspace, or the step limit is reached. Record every transition and disturbance;
+   a contact changes the terminal marker without changing the sampled disturbance.
 5. If R is adaptive, update it as cumulative mismatches divided by cumulative transitions.
-6. If C is adaptive, score the maximum continuous deviation against the pre-episode
-   prediction and update ACP and its score window.
+6. If C is adaptive, score the maximum nonterminal continuous deviation against the
+   pre-episode prediction and update ACP and its score window. If the first transition
+   is terminal, save `score=None` and skip ACP: the calibration window and adaptive
+   delta remain unchanged. A later termination retains the maximum from earlier steps.
 
 Pilot transitions never enter the R estimator. With adaptive R, all online transitions enter it.
 The calibration window applies only to C scores; R uses the entire online history.
@@ -365,8 +378,11 @@ replayed on the same saved score stream. They isolate calibration behavior;
 they do not simulate counterfactual policies or establish navigation benefits
 for separate frozen-calibration controllers.
 
-ACP uses rank `ceil((1-delta_k)*(N+1))` without interpolation. After observing
-score `score_k=max_{0 <= t < episode_length} ||Delta_t||`, it updates:
+ACP uses rank `ceil((1-delta_k)*(N+1))` without interpolation. The score is the
+maximum disturbance norm over nonterminal transitions: indices
+`0 <= t < episode_length - 1` when the episode terminates, or
+`0 <= t < episode_length` at a nonterminal time limit. An episode with no nonterminal
+transition has no score and skips ACP. Episodes with a score update:
 
 ```text
 miss_k = 1{score_k > predicted_C_k}
@@ -383,13 +399,14 @@ so conformal coverage and planning-radius coverage are identical and recorded on
 Infinite radii are retained in saved data.
 A calibrated radius need not equal that episode's true support bound.
 
-For adaptive runs, the exact bookkeeping identity after K episodes is:
+For adaptive runs, the exact bookkeeping identity after N_scored ACP updates is:
 
 ```text
-coverage(K) = 1 - delta + (delta_next - delta_1)/(eta*K)
+coverage(N_scored) = 1 - delta + (delta_next - delta_1)/(eta*N_scored)
 ```
 
-The coverage target concerns long-run episode coverage of continuous deviations.
+Episodes without a score are excluded from coverage denominators. The coverage
+target concerns the episode score computed from nonterminal disturbances.
 It is not a goal-success guarantee, a collision bound, or a guarantee for every
 short window. Assess coverage together with prediction efficiency and extended
 prediction tails. Under a stationary law, a frozen quantile may already work well;
@@ -481,12 +498,13 @@ saves ACP settings, initial and pilot scores, and the final adaptive parameter.
 Q has shape `(101, 4)` and policy has shape `(101,)` on the
 configured online grid; the exit row is zero. The fixed obstacle map is saved once
 in the MDP. Each history records `C_star_k`, `R_used`, `C_used`,
-the maximum deviation score, training diagnostics, original deviation vectors, continuous positions,
+the nonterminal deviation score, training diagnostics, original deviation vectors, continuous positions,
 extended-grid quantized positions, episode length, and terminal outcome.
 Adaptive R adds `R_hat_next`, `transition_count`, and `mismatch_count`.
 Adaptive C adds `C_hat`, `miscoverage`, `delta_k`, and `delta_next`.
-`states` and `positions` contain the initial observation followed by each actual
-landing, including the terminal landing; they have length `episode_length + 1`.
+`states` and `positions` contain the initial observation followed by each landing
+or the terminal contact marker; they have length `episode_length + 1`.
+The original sampled endpoints are recovered from `nominal_positions + deviation_vectors`.
 The disturbance, action, reward, and mismatch arrays have length `episode_length`.
 Trajectory plots connect these successive positions directly.
 
@@ -510,6 +528,8 @@ different trial number to retain another run. The script numbers trials from one
 independently of their seeds. The comparison plotter reads the matching files directly.
 Results from previous projected, padded, or resetting deployments require rerunning
 to produce the current terminal episodes, transition counts, and trajectory fields.
+Runs saved before segment collision checks or terminal-score exclusion also require
+rerunning; editing their scores alone cannot reproduce the resulting ACP and policies.
 Runs from the former changing-map experiment must also be regenerated for this comparison.
 Saved files using the previous attribute and result-key names must be regenerated.
 Baseline files using the former `RNone_CNone` suffix must be regenerated under their

@@ -90,13 +90,13 @@ def plot_calibration(runs, window):
     history = runs[0]["history"]
     episodes = np.arange(1, len(history) + 1)
     radii = np.asarray([row["C_hat"] for row in history])
-    scores = [row["score"] for row in history]
-    axes[0, 0].plot(episodes, scores, ".", label="Episode maximum continuous deviation")
+    scores = np.asarray([row["score"] for row in history], dtype=float)
+    axes[0, 0].plot(episodes, scores, ".", label="Maximum nonterminal deviation")
     axes[0, 0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label="Predicted C")
     support_bounds = [row.get("C_star_k", runs[0]["mdp"].noise_radius) for row in history]
     if "C_star_k" in history[0]:
         axes[0, 0].plot(episodes, support_bounds, "k:", label="True support bound C*")
-    ceiling = max(1, max(support_bounds), max(scores)) * 1.1
+    ceiling = max(1, max(support_bounds), np.nanmax(scores, initial=0)) * 1.1
     unbounded = np.isposinf(radii)
     if np.any(unbounded):
         axes[0, 0].scatter(
@@ -113,9 +113,11 @@ def plot_calibration(runs, window):
         fixed, frozen, support = [], [], []
         mdp = run["mdp"].clone(nominal=True)
         for row in run["history"]:
-            fixed.append(int(row["score"] > quantile.quantile()))
-            frozen.append(int(row["score"] > frozen_radius))
-            quantile.scores.append(row["score"])
+            score = row["score"]
+            fixed.append(np.nan if score is None else int(score > quantile.quantile()))
+            frozen.append(np.nan if score is None else int(score > frozen_radius))
+            if score is not None:
+                quantile.scores.append(score)
             if "obstacles" in row:
                 mdp.set_obstacles(row["obstacles"])
             radius = row["C_used"]
@@ -130,14 +132,15 @@ def plot_calibration(runs, window):
         (all_misses, "ACP", "-"), (rolling_misses, "Rolling fixed delta", "--"),
         (frozen_misses, "Frozen pilot quantile", ":"),
     ):
-        misses = np.asarray(misses)
-        axes[0, 1].plot(episodes, np.mean(1 - np.cumsum(misses, axis=1) / episodes, axis=0),
-                         style, label=label)
-        coverage = []
-        for row in misses:
-            coverage.append([1 - np.mean(row[max(0, k - window + 1):k + 1])
-                             for k in range(len(row))])
-        axes[1, 0].plot(episodes, np.mean(coverage, axis=0), style, label=label)
+        misses = np.ma.masked_invalid(np.asarray(misses, dtype=float))
+        counts = (~np.ma.getmaskarray(misses)).cumsum(axis=1)
+        coverage = 1 - np.ma.divide(misses.filled(0).cumsum(axis=1), counts)
+        axes[0, 1].plot(episodes, coverage.mean(axis=0), style, label=label)
+        coverage = np.ma.stack([
+            1 - misses[:, max(0, k - window + 1):k + 1].mean(axis=1)
+            for k in range(len(history))
+        ], axis=1)
+        axes[1, 0].plot(episodes, coverage.mean(axis=0), style, label=label)
     for axis in (axes[0, 1], axes[1, 0]):
         axis.axhline(1 - runs[0]["delta"], color="black", linestyle=":", label="Target")
         axis.set_ylim(0, 1.02)

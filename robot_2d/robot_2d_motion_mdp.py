@@ -19,7 +19,9 @@ class Robot2DMotionMDP(gym.Env):
 
     A custom noise_sampler(nominal_position, rng) returns a bounded 2-D deviation.
     The default sampler mixes zero deviation with uniform noise in a disk.
-    Noise is never projected or resampled. The final transition is always recorded.
+    Noise is never projected or resampled. Segment contacts stop uncertain rollouts
+    at the first terminal cell. Mismatches use the original sampled endpoint.
+    The final transition is recorded but excluded from ACP when it is terminal.
     """
 
     metadata = {"render_modes": []}
@@ -269,8 +271,52 @@ class Robot2DMotionMDP(gym.Env):
             raise ValueError("Noise sampler exceeded its configured support radius.")
         return deviation.astype(float)
 
+    def _collision_check_segment(self, start_position, end_position):
+        """Return (terminal state, contact position), or None, using grid traversal.
+
+        Cells are checked at successive grid-boundary crossings, including all
+        cells touched at a corner or along a grid line. Obstacle contact takes
+        precedence over simultaneous goal contact. Outside cells are not searched.
+        """
+        start_position = np.asarray(start_position, dtype=float)
+        direction = np.asarray(end_position, dtype=float) - start_position
+        shape = np.array(self.grid_shape)
+        cell = np.minimum(np.floor(start_position / self.cell_widths), shape - 1)
+        boundaries = (cell + (direction > 0)) * self.cell_widths
+        crossings, increments = np.full(2, np.inf), np.full(2, np.inf)
+        np.divide(boundaries - start_position, direction, out=crossings, where=direction != 0)
+        np.divide(self.cell_widths, np.abs(direction), out=increments, where=direction != 0)
+        parameter = 0.0
+        while True:
+            position = start_position + parameter * direction
+            grid_position = position / self.cell_widths
+            if np.any(grid_position < -1e-12) or np.any(grid_position > shape + 1e-12):
+                return None
+            rounded = np.rint(grid_position)
+            on_boundary = np.abs(grid_position - rounded) <= 1e-12
+            ix, iy = np.where(on_boundary, rounded, np.floor(grid_position)).astype(int)
+            xs = (ix - 1, ix) if on_boundary[0] else (ix,)
+            ys = (iy - 1, iy) if on_boundary[1] else (iy,)
+            goal_contact = False
+            for x in xs:
+                for y in ys:
+                    if not 0 <= x < self.nx or not 0 <= y < self.ny:
+                        continue
+                    state = x + self.nx * y
+                    if self.obstacle_mask[y, x]:
+                        return state, position
+                    goal_contact |= state == self.goal_state
+            if goal_contact:
+                return self.goal_state, position
+            if parameter == 1.0:
+                return None
+            next_crossing = float(np.min(crossings))
+            parameter = min(next_crossing, 1.0)
+            crossed = crossings == next_crossing
+            crossings[crossed] += increments[crossed]
+
     def step(self, action):
-        """Execute x'=F(x,a)+Delta and retain the unprojected observation."""
+        """Sample x'=F(x,a)+Delta; terminal contacts stop the uncertain robot."""
         if self._episode_finished:
             raise RuntimeError("Episode has ended; call reset before taking another step.")
         action = self._validate_action(action)
@@ -278,8 +324,12 @@ class Robot2DMotionMDP(gym.Env):
         nominal_state = self.nominal_next_state(state, action)
         nominal_position = self.nominal_next_position(state, action)
         deviation = self._sample_deviation(nominal_position)
-        self.position = nominal_position + deviation
-        self.s = self.discretize(self.position)
+        next_position = nominal_position + deviation
+        next_state = self.discretize(next_position)
+        contact = None
+        if not self.is_nominal:
+            contact = self._collision_check_segment(self.position, next_position)
+        self.s, self.position = (next_state, next_position) if contact is None else contact
         self.elapsed_steps += 1
         terminated = bool(self.terminal_mask[self.s])
         truncated = self.elapsed_steps >= self.max_episode_steps and not terminated
@@ -289,18 +339,18 @@ class Robot2DMotionMDP(gym.Env):
             "nominal_position": nominal_position, "deviation": deviation,
             "quantized_position": self.quantize(self.position),
             "deviation_norm": float(np.linalg.norm(deviation)),
-            "mismatch": self.s != nominal_state, "goal_reached": self.s == self.goal_state,
+            "mismatch": next_state != nominal_state, "goal_reached": self.s == self.goal_state,
             "collision": bool(
                 self.s < self.n_grid_states and self.obstacle_mask.ravel()[self.s]
             ),
             "workspace_exit": self.s == self.exit_state,
             "boundary_attempt": bool(self.boundary_commands[state, action]),
-            "boundary_violation": self.s == self.exit_state,
+            "boundary_violation": next_state == self.exit_state,
         }
         return self.s, self.reward(state, action), terminated, truncated, info
 
     def deploy_policy(self, policy, gamma, start_position=None):
-        """Record one episode through its terminal transition, without updating R/ACP."""
+        """Record all transitions; score nonterminal ones, or None if there are none."""
         options = None if start_position is None else {"position": start_position}
         _, info = self.reset(options=options)
         positions, states = [info["position"].copy()], [self.s]
@@ -308,6 +358,7 @@ class Robot2DMotionMDP(gym.Env):
         mismatches, nominal_positions, deviation_vectors = [], [], []
         quantized_positions = []
         boundary_attempts, boundary_violations = 0, 0
+        score = None
         while True:
             state = self.s
             action = int(policy(state) if callable(policy) else policy[state])
@@ -323,6 +374,8 @@ class Robot2DMotionMDP(gym.Env):
             mismatches.append(int(info["mismatch"]))
             boundary_attempts += int(info["boundary_attempt"])
             boundary_violations += int(info["boundary_violation"])
+            if not terminated:
+                score = max(0.0 if score is None else score, info["deviation_norm"])
             if terminated or truncated:
                 break
         length = len(actions)
@@ -333,7 +386,7 @@ class Robot2DMotionMDP(gym.Env):
             "deviation_vectors": np.asarray(deviation_vectors),
             "rewards": np.asarray(rewards), "deviations": np.asarray(deviations),
             "mismatches": np.asarray(mismatches), "episode_length": length,
-            "score": max(deviations), "episode_mismatches": sum(mismatches),
+            "score": score, "episode_mismatches": sum(mismatches),
             "discounted_return": float(np.dot(gamma**np.arange(len(rewards)), rewards)),
             "goal_reached": info["goal_reached"], "collision": info["collision"],
             "workspace_exit": info["workspace_exit"], "timeout": bool(truncated),

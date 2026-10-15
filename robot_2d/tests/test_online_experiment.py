@@ -46,7 +46,7 @@ class ContinuousDeploymentTests(unittest.TestCase):
         np.testing.assert_allclose(row["deviation_vectors"], [(-1, 0)])
         np.testing.assert_array_equal(row["states"][1:], mdp.exit_state)
         np.testing.assert_allclose(row["quantized_positions"], [(-0.5, 0.5)])
-        self.assertAlmostEqual(row["score"], 1.0)
+        self.assertIsNone(row["score"])
         self.assertEqual(row["episode_mismatches"], 1)
         self.assertEqual(row["boundary_violations"], 1)
         self.assertEqual(row["workspace_exit_step"], 1)
@@ -83,7 +83,7 @@ class ContinuousDeploymentTests(unittest.TestCase):
 
         row = mdp.deploy_policy(policy, 0.95)
         self.assertEqual(seen, [mdp.start_state])
-        np.testing.assert_allclose(row["positions"], [(0.5, 0.5), (1.5, 0.5)])
+        np.testing.assert_allclose(row["positions"], [(0.5, 0.5), (1.0, 0.5)])
         self.assertTrue(row["collision"])
         self.assertEqual(row["episode_mismatches"], 1)
         self.assertEqual(row["episode_length"], mdp.elapsed_steps)
@@ -102,12 +102,14 @@ class ContinuousDeploymentTests(unittest.TestCase):
             np.zeros(mdp.n_state, dtype=int), 0.95, start_position=(6.2, 7.7),
         )
         np.testing.assert_allclose(row["nominal_positions"], [(7.5, 7.5)])
-        np.testing.assert_allclose(row["positions"], [(6.2, 7.7), (7.7, 7.5)])
+        np.testing.assert_allclose(row["positions"], [(6.2, 7.7), (7.0, 7.593333333333333)])
+        np.testing.assert_allclose(row["deviation_vectors"], [(0.2, 0)])
+        self.assertIsNone(row["score"])
         np.testing.assert_array_equal(row["mismatches"], [0])
         self.assertTrue(row["goal_reached"])
         self.assertEqual(row["goal_step"], 1)
         self.assertEqual(row["episode_length"], 1)
-        self.assertAlmostEqual(row["score"], 0.2)
+        self.assertAlmostEqual(row["deviations"][0], 0.2)
         self.assertEqual(len(samples), 1)
 
     def test_reference_is_uniform_including_goal_obstacles_and_boundaries(self):
@@ -381,11 +383,15 @@ class OnlineSettingsTests(unittest.TestCase):
             )
             for row in controller.history:
                 self.assertNotIn("obstacles", row)
-                self.assertLessEqual(row["score"], row["C_star_k"])
+                if row["score"] is not None:
+                    self.assertLessEqual(row["score"], row["C_star_k"])
                 np.testing.assert_array_equal(row["mismatches"], row["deviations"] > 0)
+                nonterminal = slice(None) if row["timeout"] else slice(None, -1)
                 np.testing.assert_allclose(
-                    row["positions"][1:], row["nominal_positions"] + row["deviation_vectors"],
+                    row["positions"][1:][nonterminal],
+                    (row["nominal_positions"] + row["deviation_vectors"])[nonterminal],
                 )
+                self.assertEqual(row["score"], max(row["deviations"][nonterminal], default=None))
             np.testing.assert_array_equal(
                 controller.training_env.obstacle_mask, controller.deployment_env.obstacle_mask,
             )
@@ -406,7 +412,7 @@ class OnlineSettingsTests(unittest.TestCase):
             deviation = saved_mdp._sample_deviation(saved_mdp.coordinates(saved_mdp.start_state))
             self.assertLessEqual(np.linalg.norm(deviation), saved_mdp.noise_radius)
 
-    def test_exit_counts_one_transition_and_calibrates_the_raw_disturbance(self):
+    def test_first_step_exit_counts_for_R_and_skips_ACP(self):
         mdp = Robot2DMotionMDP(
             x_max=2, y_max=2, grid_shape=(2, 2), noise_radius=10,
             noise_sampler=lambda position, rng: np.array([10.0, 0.0]),
@@ -420,8 +426,11 @@ class OnlineSettingsTests(unittest.TestCase):
         self.assertEqual(record["transition_count"], 1)
         self.assertEqual(record["episode_mismatches"], 1)
         self.assertEqual(record["R_hat_next"], 1)
-        self.assertEqual(record["score"], 10)
-        self.assertEqual(record["miscoverage"], 1)
+        self.assertEqual(record["deviations"].tolist(), [10])
+        self.assertIsNone(record["score"])
+        self.assertIsNone(record["miscoverage"])
+        self.assertEqual(controller.acp.n_updates, 0)
+        self.assertEqual(controller.acp.delta_k, controller.acp.delta_1)
         np.testing.assert_array_equal(controller.Q[mdp.exit_state], 0)
 
 
