@@ -114,6 +114,37 @@ class RobustQLearningTests(unittest.TestCase):
         finally:
             env.close()
 
+    def test_supplied_initial_table_is_copied_and_terminal_rows_stay_zero(self):
+        mdp = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), max_episode_steps=1, movement_reward=0,
+        )
+        initial_Q = np.full((mdp.n_state, 4), 2.0)
+        agent = Tabular_Agent(mdp, 0.9, 0.5, epsilon_init=0, epsilon_lb=0, seed=1)
+        agent.robust_q_learning(1, initial_Q=initial_Q, exploring_starts=False)
+        np.testing.assert_array_equal(initial_Q, 2.0)
+        self.assertEqual(agent.evaluation_return[0], 2.0)
+        np.testing.assert_array_equal(agent.Q[mdp.terminal_mask], 0)
+        self.assertFalse(agent.training_diagnostics["zero_initialized"])
+        for invalid in (np.zeros((2, 4)), np.full(agent.Q.shape, np.nan)):
+            with self.assertRaisesRegex(ValueError, "initial_Q"):
+                agent.robust_q_learning(1, initial_Q=invalid)
+
+    def test_value_iteration_matches_reference_and_rejects_unconverged_labels(self):
+        mdp = self.small_mdp()
+        agent = Tabular_Agent(mdp, 0.9, 0.5)
+        for R, C in ((0, 0), (0.25, 0.6), (0.9, np.inf)):
+            with self.subTest(R=R, C=C):
+                Q, policy = agent.value_iteration(R=R, C=C, tolerance=1e-10)
+                np.testing.assert_allclose(Q, reference_q(mdp, 0.9, R, C), atol=1e-9)
+                np.testing.assert_array_equal(Q[mdp.terminal_mask], 0)
+                np.testing.assert_array_equal(policy, Q.argmax(axis=1))
+                self.assertLessEqual(agent.value_iteration_diagnostics["bellman_residual"], 1e-10)
+        with self.assertRaisesRegex(RuntimeError, "did not converge"):
+            agent.value_iteration(R=0, C=0, max_iterations=1)
+        one_step = Tabular_Agent(mdp, 0.0, 0.5)
+        one_step.value_iteration(max_iterations=1)
+        self.assertEqual(one_step.value_iteration_diagnostics["bellman_residual"], 0)
+
 if __name__ == "__main__":
     unittest.main()
 

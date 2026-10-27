@@ -229,5 +229,26 @@ class ControllerTests(unittest.TestCase):
             first.history[0]["deviation_vectors"], first.history[1]["deviation_vectors"],
         ))
 
+    def test_initializer_gets_planning_inputs_without_being_saved_in_the_agent(self):
+        calls = []
+
+        def initializer(mdp, R_used, C_used):
+            calls.append((mdp, R_used, C_used))
+            return np.full((len(mdp.states), mdp.action_space.n), 0.5)
+
+        adaptive = self.controller(q_initializer=initializer, training_episodes=5)
+        for record in adaptive.run(2):
+            self.assertFalse(record["training"]["zero_initialized"])
+        self.assertEqual(len(calls), 2)
+        for call, record in zip(calls, adaptive.history):
+            self.assertIs(call[0], adaptive.training_env)
+            self.assertEqual(call[1:], (record["R_used"], record["C_used"]))
+        self.assertFalse(hasattr(adaptive.agent, "q_initializer"))
+        calls.clear()
+        fixed = self.controller(q_initializer=initializer, R=0.3, C=np.inf, training_episodes=5)
+        fixed.run(2)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(fixed.history[1]["training_reused"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -27,7 +27,7 @@ def main(
     delta=0.1, delta_1=None, eta=0.01, calibration_window=100, quantile_max = 3.0,
     pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
     method="proposed", R=None, C=None, R_star=0.2, shift_period=100,
-    verbose=True, trial=1,
+    verbose=True, trial=1, q_initializer=None,
 ):
     """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
 
@@ -67,7 +67,7 @@ def main(
         delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
         calibration_scores=calibration_scores, calibration_window=calibration_window,
         pilot_episodes=pilot_episodes, seed=seed, R=R, C=C,
-        episode_setup=prepare_episode,
+        episode_setup=prepare_episode, q_initializer=q_initializer,
     )
     controller.run(n_deployment_episodes, verbose=verbose)
     mdp = controller.deployment_env
@@ -140,6 +140,12 @@ if __name__ == "__main__":
     pilot_episodes = 100
     R_star = 0.4
     shift_period = 100
+    # Leave None for the original zero initialization; otherwise set a checkpoint directory.
+    checkpoint_path = None
+    q_initializer = None
+    if checkpoint_path is not None:
+        from q_transformer.model import QTransformerPredictor
+        q_initializer = QTransformerPredictor(checkpoint_path)
 
     for trial, seed in enumerate(seeds, 1):
         for index, method in enumerate(methods):
@@ -149,4 +155,5 @@ if __name__ == "__main__":
                 n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
                 eta=0.1, calibration_window=100, pilot_episodes=pilot_episodes, quantile_max = 3.0,
                 R_star=R_star, shift_period=shift_period,
+                q_initializer=q_initializer,
             )

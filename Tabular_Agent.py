@@ -64,10 +64,15 @@ class Tabular_Agent:
         if np.isnan(C) or C < 0:
             raise ValueError("Deviation radius C must be nonnegative, or positive infinity.")
 
-    def initialize_q(self):
-        """Initialize Q"""
-        # TODO: override this method for a custom or LLM warm start
-        self.Q.fill(0.0)
+    def initialize_q(self, initial_Q=None):
+        """Start from zeros, or copy a finite Q-table supplied by any initializer."""
+        if initial_Q is None:
+            self.Q.fill(0.0)
+            return
+        initial_Q = np.asarray(initial_Q, dtype=float)
+        if initial_Q.shape != self.Q.shape or not np.all(np.isfinite(initial_Q)):
+            raise ValueError(f"initial_Q must be a finite array with shape {self.Q.shape}.")
+        self.Q[:] = initial_Q
 
     def epsilon_greedy_policy(self, state):
         if self.rng.random() < self.epsilon:
@@ -102,9 +107,40 @@ class Tabular_Agent:
                 residual = max(residual, abs(target - self.Q[row, action]))
         return float(residual)
 
+    def value_iteration(self, *, R=None, C=None, tolerance=1e-8, max_iterations=10000):
+        """Solve the known nominal model synchronously; reject unconverged teacher labels."""
+        if not np.isfinite(tolerance) or tolerance <= 0:
+            raise ValueError("tolerance must be positive and finite.")
+        if not isinstance(max_iterations, (int, np.integer)) or max_iterations < 1:
+            raise ValueError("max_iterations must be a positive integer.")
+        self.R = self.R if R is None else R
+        self.C = self.C if C is None else C
+        self._validate_uncertainty(self.R, self.C)
+        base = self.env.unwrapped
+        self.initialize_q()
+        for iteration in range(1, max_iterations + 1):
+            values = self.Q.max(axis=1)
+            updated = np.zeros_like(self.Q)
+            for state in base.trainable_states:
+                row = base.state_index(state)
+                for action in range(self.n_action):
+                    successor = base.nominal_next_state(state, action)
+                    reward = base.reward(state, action)
+                    updated[row, action] = self.robust_td_target(reward, successor, values)
+            change = float(np.max(np.abs(updated - self.Q)))
+            self.Q[:] = updated
+            if change <= tolerance or iteration == max_iterations:
+                residual = self.robust_bellman_residual()
+                if residual <= tolerance:
+                    self.value_iteration_diagnostics = {
+                        "iterations": iteration, "bellman_residual": residual,
+                    }
+                    return self.Q.copy(), np.argmax(self.Q, axis=1)
+        raise RuntimeError(f"Value iteration did not converge in {max_iterations} iterations.")
+
     def robust_q_learning(
         self, n_episodes, *, R=None, C=None, exploring_starts=None, record_every=1,
-        verbose=False,
+        verbose=False, initial_Q=None,
     ):
         """Algorithm 1, with customizable initialization and a deterministic nominal simulator.
 
@@ -131,7 +167,10 @@ class Tabular_Agent:
             exploring_starts = hasattr(base, "trainable_states")
         if exploring_starts and not hasattr(base, "trainable_states"):
             raise ValueError("This environment does not support exploring starts.")
-        self.initialize_q()
+        if initial_Q is None:
+            self.initialize_q()
+        else:
+            self.initialize_q(initial_Q)
         self.Q[base.terminal_mask] = 0.0
         values = np.max(self.Q, axis=1)
         zero_initialized = bool(np.all(self.Q == 0.0))

@@ -214,6 +214,18 @@ class Robot2DMotionMDP(gym.Env):
             return 0.0
         return float(self.rewards[self.state_index(state), action])
 
+    def q_transformer_context(self):
+        """Return the numeric grid and navigation instructions for the shared prompt."""
+        grid = "\n".join(" ".join(map(str, row.astype(int))) for row in self.obstacle_mask)
+        return (
+            f"You are given a grid with size {self.nx}x{self.ny}.\n"
+            "The maze is a 2D grid with rows in increasing y and columns in increasing x.\n"
+            "0 = free space, 1 = obstacle.\n\n"
+            f"{grid}\n"
+            f"Start at {self.start_state} and move to {self.goal_state}.\n"
+            "Goal, obstacle, and outside states are terminal with zero Q-values."
+        )
+
     def localized_uncertainty_states(self, nominal_next_state, C):
         """Enumerate the finite-C neighborhood over the global grid, using equation (4)."""
         if not np.isfinite(C) or C < 0:

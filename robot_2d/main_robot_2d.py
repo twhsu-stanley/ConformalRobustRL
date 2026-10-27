@@ -15,7 +15,7 @@ from Tabular_Agent import Tabular_Agent
 
 def main(
     *, R=0.15, C=1.2, gamma=0.95, training_episodes=5000, n_trials=15,
-    horizon=100, seed=7, output_dir=None,
+    horizon=100, seed=7, output_dir=None, q_initializer=None,
 ):
     if not isinstance(n_trials, (int, np.integer)) or n_trials < 1:
         raise ValueError("n_trials must be a positive integer.")
@@ -38,7 +38,8 @@ def main(
             epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
             R=R, C=C, seed=None if seed is None else seed + trial,
         )
-        agent.robust_q_learning(training_episodes, record_every=1)
+        initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
+        agent.robust_q_learning(training_episodes, record_every=1, initial_Q=initial_Q)
         evaluation_return.append(agent.evaluation_return.copy())
         agents.append(agent)
         print(
@@ -61,14 +62,21 @@ def main(
 
 
 if __name__ == "__main__":
+    # This example needs a checkpoint trained with its own reward settings and discount.
+    checkpoint_path = None
+    q_initializer = None
+    if checkpoint_path is not None:
+        from q_transformer.model import QTransformerPredictor
+        q_initializer = QTransformerPredictor(checkpoint_path)
+
     # Fix C = 1.0, compare different R values
-    main(R=0.0, C=1.0)
+    main(R=0.0, C=1.0, q_initializer=q_initializer)
 
-    main(R=0.1, C=1.0)
+    main(R=0.1, C=1.0, q_initializer=q_initializer)
 
-    main(R=0.2, C=1.0)
+    main(R=0.2, C=1.0, q_initializer=q_initializer)
 
     # Fix R = 0.2, compare different C values
-    main(R=0.2, C=0.0)
+    main(R=0.2, C=0.0, q_initializer=q_initializer)
     # R=0.2, C=1.0 was already trained above.
-    main(R=0.2, C=2.0)
+    main(R=0.2, C=2.0, q_initializer=q_initializer)

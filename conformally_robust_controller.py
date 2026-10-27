@@ -9,7 +9,7 @@ from Tabular_Agent import Tabular_Agent
 class ConformallyRobustController:
     """Own independent nominal/deployment environments and persistent calibration.
 
-    Adaptive planning starts Algorithm 1 from zero every episode. Fixed R and C
+    Algorithm 1 starts from zero unless a q_initializer is supplied. Fixed R and C
     reuse the policy on the fixed nominal training MDP. The MDP supplies clone()
     and deploy_policy(). Only actual deployment transitions enter the mismatch
     estimate; pilot calibration does not. Episodes stop at a terminal condition,
@@ -23,6 +23,8 @@ class ConformallyRobustController:
     R_used and C_used are the actual Algorithm 1 inputs.
     episode_setup(controller, index) runs before each episode and returns metadata.
     Indices are zero-based online and negative for the initial pilot episodes.
+    q_initializer(mdp, R_used, C_used) optionally returns the initial Q-table;
+    the predictor remains outside the agent and saved experiment results.
     """
 
     def __init__(
@@ -32,7 +34,7 @@ class ConformallyRobustController:
         pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, R=None, C=None,
-        episode_setup=None,
+        episode_setup=None, q_initializer=None,
     ):
         Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
         for name, value in (
@@ -53,6 +55,7 @@ class ConformallyRobustController:
         self.fixed_R = None if R is None else float(R)
         self.fixed_C = None if C is None else float(C)
         self.episode_setup = episode_setup
+        self.q_initializer = q_initializer
         self.rng = np.random.default_rng(seed)
         self.training_env = mdp.clone(nominal=True, max_episode_steps=training_horizon)
         self.deployment_env = mdp.clone(max_episode_steps=horizon, seed=self._next_seed())
@@ -121,8 +124,12 @@ class ConformallyRobustController:
                 self.training_env, R=R_used, C=C_used, seed=self._next_seed(),
                 **self.agent_options,
             )
+            initial_Q = None
+            if self.q_initializer is not None:
+                initial_Q = self.q_initializer(self.training_env, R_used, C_used)
             self.Q, self.policy = self.agent.robust_q_learning(
                 self.training_episodes, exploring_starts=True, record_every=100,
+                initial_Q=initial_Q,
             )
         record = self.deployment_env.deploy_policy(self.policy, self.gamma)
         record.update({
