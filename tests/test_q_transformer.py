@@ -110,7 +110,7 @@ assert controller.run_episode()['training']['zero_initialized']
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
-@unittest.skipUnless(HAS_TRANSFORMER, "Install requirements-transformer.txt for model checks")
+@unittest.skipUnless(HAS_TRANSFORMER, "Install requirement.txt for model checks")
 class TransformerModelTests(unittest.TestCase):
     def test_training_checkpoint_reload_and_actual_q_learning_warm_start(self):
         import torch

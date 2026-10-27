@@ -1,0 +1,8 @@
+# Core simulation and plotting
+numpy>=1.24
+gymnasium>=0.29
+matplotlib>=3.7
+
+# Transformer training and warm-start inference
+torch>=2.6,<2.7
+transformers>=4.46,<5

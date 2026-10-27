@@ -7,15 +7,21 @@ continuous deviation radius C using adaptive conformal prediction (ACP).
 
 ## Run
 
-From the repository root:
+From the repository root, create and activate a virtual environment, then install
+all simulation, plotting, and transformer dependencies from the single requirements
+file:
 
-```powershell
-python -m pip install -r requirements.txt
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirement.txt
 python -m robot_2d.main_robot_2d_online
 python -m robot_2d.plot_online_comparison
 ```
 
-On Windows, `.\.venv\Scripts\python.exe` can replace `python`.
+On Windows, create the environment with `py -m venv .venv` and activate it with
+`.\.venv\Scripts\Activate.ps1` in PowerShell before running the `python` commands.
+Select `.venv/bin/python` (Windows: `.venv\Scripts\python.exe`) as the IDE interpreter.
 The scripts also support direct execution. Configure experiments through the
 ordinary arguments and the settings under `if __name__ == "__main__"`; there is
 no command-line parser.
@@ -89,8 +95,8 @@ Algorithm 1 samples only nominal transitions `s_next = f(s, a)`.
 a supplied finite Q-table. Pass the table through
 `agent.robust_q_learning(..., initial_Q=predicted_Q)`. Terminal rows are zeroed after
 initialization and never receive TD updates. Initial cached values and diagnostics
-are derived from the initialized table. The default case needs no transformer
-dependencies or checkpoint and retains the same training behavior.
+are derived from the initialized table. The default case does not import transformer
+libraries or require a checkpoint and retains the same training behavior.
 
 For finite C, `mdp.localized_uncertainty_states(nominal_next_state, C)` returns
 actual grid-coordinate pairs, including outside cells, using equations (3)-(4):
@@ -261,7 +267,6 @@ Generate the dataset once, then train from the saved file:
 
 ```powershell
 python -m robot_2d.generate_robot_2d_q_data
-python -m pip install -r requirements-transformer.txt
 python -m robot_2d.train_robot_2d_transformer
 ```
 
@@ -271,7 +276,7 @@ discount, with 200 maps containing 10-30 obstacles. Each map first samples rando
 start and goal cells with physical cell-center distance at least
 `start_goal_seperation=7.5`. Obstacles then retain the two-cell clearance from both
 endpoints and a nominal start-to-goal path. The seed controls endpoint and obstacle
-sampling. Dataset generation does not require transformer dependencies.
+sampling. Dataset generation does not import transformer libraries.
 
 `train_robot_2d_transformer.py` only loads the existing dataset and trains the model.
 Configure epochs, batch size, learning rate, and model name there. Rerunning this
