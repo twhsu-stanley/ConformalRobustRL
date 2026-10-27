@@ -333,9 +333,9 @@ generation and deployment configurations.
 The 2-D description follows the original instruction prompt: grid dimensions,
 a numeric grid (`0 = free space`, `1 = obstacle`), actual start and goal cell
 indices. Grid rows increase in y and columns increase in x. The shared formatter
-adds `### Instruction:` and `### Response:`,
-supplies R/C (including `infinity`), and requests the Q-table only. Targets remain
-numeric Q-tables. The unknown deployment disturbance law is not an input.
+adds `### Instruction:`, supplies numeric R/C (including `infinity`), and requests
+the Q-table. Targets remain numeric Q-tables. The unknown deployment disturbance
+law is not an input.
 Training and inference use the same formatter and tokenizer. Inputs exceeding the
 encoder context are rejected rather than truncated; larger 3-D grids may need a
 longer-context encoder or a compact map description.

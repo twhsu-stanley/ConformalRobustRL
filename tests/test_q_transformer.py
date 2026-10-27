@@ -86,10 +86,8 @@ class TransformerDataTests(unittest.TestCase):
         prompt = format_prompt(description, 0.3, np.inf)
         self.assertNotEqual(format_prompt(description, 0, 0), prompt)
         self.assertTrue(prompt.startswith("### Instruction:\n"))
-        self.assertTrue(prompt.endswith("### Response:\n"))
-        self.assertIn("R = 0.3 and C = infinity", prompt)
+        self.assertIn("Predict the Q-table for R = 0.3 and C = infinity.", prompt)
         self.assertIn("Layer z = 0\n0 0", prompt)
-        self.assertIn("Output the Q Table only", prompt)
 
     def test_zero_initialization_does_not_import_transformer_dependencies(self):
         script = """

@@ -222,8 +222,8 @@ class Robot2DMotionMDP(gym.Env):
             "The maze is a 2D grid with rows in increasing y and columns in increasing x.\n"
             "0 = free space, 1 = obstacle.\n\n"
             f"{grid}\n"
-            f"Start at {self.start_state} and move to {self.goal_state}.\n"
-            "Goal, obstacle, and outside states are terminal with zero Q-values."
+            f"Start at {self.start_state} and move to the goal state at {self.goal_state}.\n"
+            "Goal state and obstacles have zero Q-values."
         )
 
     def localized_uncertainty_states(self, nominal_next_state, C):

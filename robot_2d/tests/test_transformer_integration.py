@@ -71,9 +71,7 @@ class TransformerIntegrationTests(unittest.TestCase):
         self.assertIn("size 3x2", prompt)
         self.assertIn("0 = free space, 1 = obstacle.\n\n0 1 0\n0 0 0", prompt)
         self.assertIn("Start at (0, 0) and move to (2, 1)", prompt)
-        self.assertIn("R = 0.3 and C = infinity", prompt)
-        self.assertIn("Output the Q Table only", prompt)
-        self.assertTrue(prompt.endswith("### Response:\n"))
+        self.assertIn("Predict the Q-table for R = 0.3 and C = infinity.", prompt)
 
     def test_random_endpoints_use_physical_distance_and_repeat_with_the_seed(self):
         mdp = Robot2DMotionMDP(x_max=6, y_max=3, grid_shape=(3, 3), obstacles=[])

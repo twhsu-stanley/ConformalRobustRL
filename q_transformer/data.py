@@ -14,11 +14,8 @@ def format_prompt(description, R, C):
     return (
         "### Instruction:\n"
         f"{description.rstrip()}\n"
-        f"Use the localized (R,C)-contamination model with R = {float(R)!r} "
-        f"and C = {radius}.\n"
-        "Output the Q Table only.\n"
+        f"Predict the Q-table for R = {float(R)!r} and C = {radius}.\n"
         "Do NOT include extra text or explanations.\n\n"
-        "### Response:\n"
     )
 
 
