@@ -71,7 +71,6 @@ def mismatch_probabilities(mdp):
         nominal_mass = area / (np.pi * mdp.noise_radius**2)
         probability = mdp.noise_probability * (1 - nominal_mass)
     result = np.full((mdp.n_state, mdp.action_space.n), probability)
-    result[mdp.exit_state] = 0  # Outside outcomes are never decision states.
     return np.clip(result, 0, 1)
 
 
@@ -83,7 +82,7 @@ def plot_R(runs):
         mdp = run["mdp"]
         probability = run.get("R_star")
         if probability is None:
-            probability = mismatch_probabilities(mdp)[mdp.start_state, 0]
+            probability = mismatch_probabilities(mdp)[mdp.state_index(mdp.start_state), 0]
         probabilities.append(probability)
         estimate = np.asarray([row["R_hat_next"] for row in run["history"]])
         estimates.append(estimate)
@@ -96,7 +95,7 @@ def plot_R(runs):
 
 
 def plot_acp(runs):
-    """Show online scores and radii, pilot scores, and adaptive delta for the first trial."""
+    """Show episode scores, radii, and adaptive delta for the first trial."""
     fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
     run = runs[0]
     history = run["history"]
@@ -104,7 +103,9 @@ def plot_acp(runs):
     radii = np.asarray([row["C_hat"] for row in history])
     scores = np.asarray([row["score"] for row in history], dtype=float)
     axes[0].plot(episodes, scores, ".", label="nonconformity scores")
-    axes[0].plot(episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$")
+    axes[0].plot(
+        episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$",
+    )
     support_bounds = [row.get("C_star_k", run["mdp"].noise_radius) for row in history]
     if "C_star_k" in history[0]:
         axes[0].plot(episodes, support_bounds, "k:", label=r"True support bound $C^\star$")
@@ -116,19 +117,12 @@ def plot_acp(runs):
         )
     axes[0].set(title="Scores and predictions, first trial",
                 xlabel="Deployment episode k", ylabel="Distance")
-    #pilot_scores = run["pilot_scores"]
 
     axes[1].plot(episodes, [row["delta_k"] for row in history], label=r"$\delta_k$")
     axes[1].axhline(run["delta"], color="black", linestyle="--", label=r"Target $\delta$")
     axes[1].set(title="Adaptive failure parameter, first trial",
                     xlabel="Deployment episode k", ylabel="Failure parameter")
 
-    #axes[2].plot(np.arange(1, len(pilot_scores) + 1), pilot_scores, ".-", label="Pilot scores")
-    #if not pilot_scores:
-    #    axes[2].text(0.5, 0.5, "No pilot episodes", ha="center", va="center",
-    #                 transform=axes[2].transAxes)
-    #axes[2].set(title="Pilot scores, first trial", xlabel="Pilot score index", ylabel="Score")
-    
     return fig
 
 

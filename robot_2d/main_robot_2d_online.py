@@ -37,7 +37,7 @@ def main(
     Fixed R/C disable the corresponding updates and allow policy reuse when both are fixed.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
     The supplied obstacle map stays fixed throughout the run. Each episode has
-    a fixed disturbance law whose support bound varies slowly within [0.5, 2.0],
+    a fixed disturbance law whose support bound varies slowly within [0.5, 1.5],
     while R_star stays constant.
     These true simulator parameters are not supplied to the Q-learning agent.
     The trial loop passes the fixed map to every method and trial. Matching

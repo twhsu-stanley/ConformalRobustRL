@@ -101,7 +101,7 @@ class ControllerTests(unittest.TestCase):
                          first["episode_mismatches"] + second["episode_mismatches"])
         self.assertAlmostEqual(second["R_hat_next"], second["mismatch_count"] / count)
 
-    def test_variable_episodes_weight_R_by_transitions_and_skip_empty_ACP_episodes(self):
+    def test_variable_episodes_weight_R_by_transitions_and_score_every_episode(self):
         deviations = iter(([0.2, 0], [0.1, 0], [-2.0, 0], [0, 0], [0, 0.6]))
         mdp = Robot2DMotionMDP(
             x_max=2, y_max=2, grid_shape=(2, 2), noise_radius=2,
@@ -111,24 +111,24 @@ class ControllerTests(unittest.TestCase):
             mdp, horizon=6, training_episodes=1, calibration_scores=[0.1] * 10,
             delta=0.2, eta=0.1, R_hat_init=0.2,
         )
-        policy = np.array([0, 2, 0, 0, 0])
+        policy = np.array([0, 2, 0, 0])
         with patch("conformally_robust_controller.Tabular_Agent.robust_q_learning",
                    return_value=(np.zeros((mdp.n_state, 4)), policy)):
             first, second, third = controller.run(3)
         self.assertEqual([row["episode_length"] for row in controller.history], [2, 1, 2])
         self.assertEqual([row["transition_count"] for row in controller.history], [2, 3, 5])
         self.assertAlmostEqual(first["score"], 0.2)
-        self.assertIsNone(second["score"])
-        self.assertIsNone(second["miscoverage"])
-        self.assertEqual(second["delta_k"], second["delta_next"])
-        self.assertEqual(third["score"], 0)
+        self.assertEqual(second["score"], 2.0)
+        self.assertEqual(second["miscoverage"], 1)
+        self.assertAlmostEqual(second["delta_next"], second["delta_k"] - 0.08)
+        self.assertEqual(third["score"], 0.6)
         self.assertEqual(first["R_hat_next"], 0)
         self.assertAlmostEqual(second["R_hat_next"], 1 / 3)
         self.assertEqual(third["R_hat_next"], 0.4)
         self.assertEqual(second["R_used"], first["R_hat_next"])
         self.assertEqual(third["R_used"], second["R_hat_next"])
-        self.assertEqual(controller.acp.n_updates, 2)
-        self.assertAlmostEqual(controller.acp.delta_k, 0.14)
+        self.assertEqual(controller.acp.n_updates, 3)
+        self.assertAlmostEqual(controller.acp.delta_k, 0.06)
 
     def test_pilot_scores_do_not_enter_R_counts(self):
         controller = self.controller(calibration_scores=None, pilot_episodes=3)
@@ -149,7 +149,7 @@ class ControllerTests(unittest.TestCase):
         record = controller.run_episode()
         self.assertTrue(record["goal_reached"])
         self.assertEqual(record["episode_length"], 2)
-        self.assertFalse(np.any(record["states"][:-1] == mdp.goal_state))
+        self.assertFalse(np.any(np.all(record["states"][:-1] == mdp.goal_state, axis=1)))
         self.assertEqual(record["transition_count"], 2)
         self.assertEqual(record["R_hat_next"], 0)
         self.assertEqual(record["score"], 0)

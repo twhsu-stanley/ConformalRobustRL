@@ -14,7 +14,7 @@ class ConformallyRobustController:
     and deploy_policy(). Only actual deployment transitions enter the mismatch
     estimate; pilot calibration does not. Episodes stop at a terminal condition,
     with horizon acting as a step limit. R uses the observed transition count tau_k.
-    ACP scores exclude terminal transitions; episodes without a score skip ACP.
+    ACP scores include every sampled disturbance, including terminal transitions.
 
     R=None enables mismatch counting and estimation; numeric R disables them.
     C=None enables pilots and ACP; numeric C disables them, including C=infinity.
@@ -28,7 +28,8 @@ class ConformallyRobustController:
     def __init__(
         self, mdp, *, gamma=0.95, horizon=100, training_episodes=2000,
         training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
-        eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100, pilot_episodes=20,
+        eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100,
+        pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, R=None, C=None,
         episode_setup=None,
@@ -100,8 +101,7 @@ class ConformallyRobustController:
             if self.episode_setup is not None:
                 self.episode_setup(self, episode)
             record = self.deployment_env.deploy_policy(random_policy, self.gamma)
-            if record["score"] is not None:
-                self.pilot_scores.append(record["score"])
+            self.pilot_scores.append(record["score"])
         self.acp = ACP(self.pilot_scores, **self.acp_options)
         self.initial_calibration_scores = list(self.acp.scores)
 
@@ -139,11 +139,7 @@ class ConformallyRobustController:
                 "mismatch_count": self.mismatch_count,
             })
         if self.fixed_C is None:
-            update = {
-                "miscoverage": None, "delta_k": self.acp.delta_k, "delta_next": self.acp.delta_k,
-            }
-            if record["score"] is not None:
-                update = self.acp.update(record["score"], predicted_radius=C_used)
+            update = self.acp.update(record["score"], predicted_radius=C_used)
             record.update({"C_hat": float(C_used), **update})
         record.update(settings)
         self.history.append(record)

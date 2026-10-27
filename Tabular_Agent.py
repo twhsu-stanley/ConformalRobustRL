@@ -20,12 +20,12 @@ class Tabular_Agent:
     ):
         self.env = env
         for name in (
-            "reward", "terminal_mask", "state_coordinates", "localized_uncertainty_states",
+            "reward", "terminal_mask", "states", "state_index", "values_at", "worst_case_value",
         ):
             if not hasattr(env.unwrapped, name):
                 raise ValueError(f"The MDP must define {name}.")
         self.gamma = gamma
-        self.n_state = env.observation_space.n
+        self.n_state = len(env.unwrapped.states)
         self.n_action = env.action_space.n
         if not np.isfinite(gamma) or not 0 <= gamma < 1:
             raise ValueError("gamma must be in [0, 1).")
@@ -36,7 +36,7 @@ class Tabular_Agent:
         if step_start_decay_lr < 0:
             raise ValueError("step_start_decay_lr must be nonnegative.")
         self.rng = np.random.default_rng(seed)
-        self.initial_state = int(getattr(env.unwrapped, "start_state", 0))
+        self.initial_state = env.unwrapped.start_state
         self.training_diagnostics = {}
 
         self.Q = np.zeros((self.n_state, self.n_action))
@@ -64,19 +64,27 @@ class Tabular_Agent:
         if np.isnan(C) or C < 0:
             raise ValueError("Deviation radius C must be nonnegative, or positive infinity.")
 
+    def initialize_q(self):
+        """Initialize Q"""
+        # TODO: override this method for a custom or LLM warm start
+        self.Q.fill(0.0)
+
     def epsilon_greedy_policy(self, state):
         if self.rng.random() < self.epsilon:
             return int(self.rng.integers(self.n_action))
-        best_actions = np.flatnonzero(self.Q[state] == np.max(self.Q[state]))
+        row = self.env.unwrapped.state_index(state)
+        best_actions = np.flatnonzero(self.Q[row] == np.max(self.Q[row]))
         return int(self.rng.choice(best_actions))
 
     def robust_td_target(self, reward, nominal_next_state, values, R=None, C=None):
         R = self.R if R is None else R
         C = self.C if C is None else C
+        base = self.env.unwrapped
+        nominal_value = base.values_at(nominal_next_state, values)
         if R == 0:
-            return float(reward + self.gamma * values[nominal_next_state])
-        states = self.env.unwrapped.localized_uncertainty_states(nominal_next_state, C)
-        next_value = (1 - R) * values[nominal_next_state] + R * np.min(values[states])
+            return float(reward + self.gamma * nominal_value)
+        worst_value = base.worst_case_value(nominal_next_state, C, values)
+        next_value = (1 - R) * nominal_value + R * worst_value
         return float(reward + self.gamma * next_value)
 
     def robust_bellman_residual(self):
@@ -85,20 +93,20 @@ class Tabular_Agent:
         if not hasattr(base, "nominal_next_state"):
             return None
         values = np.max(self.Q, axis=1)
-        values[base.terminal_mask] = 0.0
         residual = 0.0
-        for state in np.flatnonzero(~base.terminal_mask):
+        for state in base.trainable_states:
+            row = base.state_index(state)
             for action in range(self.n_action):
                 successor = base.nominal_next_state(state, action)
                 target = self.robust_td_target(base.reward(state, action), successor, values)
-                residual = max(residual, abs(target - self.Q[state, action]))
+                residual = max(residual, abs(target - self.Q[row, action]))
         return float(residual)
 
     def robust_q_learning(
         self, n_episodes, *, R=None, C=None, exploring_starts=None, record_every=1,
         verbose=False,
     ):
-        """Algorithm 1, with zero initialization and a deterministic nominal simulator.
+        """Algorithm 1, with customizable initialization and a deterministic nominal simulator.
 
         Learning rates stay constant during the initial global warmup, then decay
         by each pair's own post-warmup visit count. Infinite visits consequently
@@ -123,17 +131,19 @@ class Tabular_Agent:
             exploring_starts = hasattr(base, "trainable_states")
         if exploring_starts and not hasattr(base, "trainable_states"):
             raise ValueError("This environment does not support exploring starts.")
-        self.Q.fill(0.0)
+        self.initialize_q()
+        self.Q[base.terminal_mask] = 0.0
+        values = np.max(self.Q, axis=1)
+        zero_initialized = bool(np.all(self.Q == 0.0))
         self.epsilon = self.epsilon_init
-        self.evaluation_return = [0.0]
+        self.evaluation_return = [base.values_at(self.initial_state, values)]
         visits = np.zeros_like(self.Q, dtype=int)
         decay_visits = np.zeros_like(visits)
-        values = np.zeros(self.n_state)
         cumulative_step = 0
         start_pairs = None
         if exploring_starts:
             start_pairs = np.array([
-                (state, action) for state in base.trainable_states
+                (base.state_index(state), action) for state in base.trainable_states
                 for action in range(self.n_action)
             ])
         for episode in range(n_episodes):
@@ -144,32 +154,32 @@ class Tabular_Agent:
             if exploring_starts:
                 if episode % len(start_pairs) == 0:
                     self.rng.shuffle(start_pairs)
-                start_state, first_action = start_pairs[episode % len(start_pairs)]
-                options = {"state": int(start_state)}
+                start_row, first_action = start_pairs[episode % len(start_pairs)]
+                options = {"state": base.states[start_row]}
             state, _ = self.env.reset(options=options)
             while True:
                 action = self.epsilon_greedy_policy(state) if first_action is None else first_action
                 first_action = None
                 successor, reward, terminated, truncated, _ = self.env.step(action)
-                visits[state, action] += 1
+                row = base.state_index(state)
+                visits[row, action] += 1
                 if cumulative_step >= self.step_start_decay_lr:
-                    decay_visits[state, action] += 1
-                    learning_rate = self.lr_init / decay_visits[state, action]
+                    decay_visits[row, action] += 1
+                    learning_rate = self.lr_init / decay_visits[row, action]
                 else:
                     learning_rate = self.lr_init
                 target = self.robust_td_target(reward, successor, values)
-                self.Q[state, action] += learning_rate * (target - self.Q[state, action])
-                values[state] = np.max(self.Q[state])
-                values[base.terminal_mask] = 0.0
+                self.Q[row, action] += learning_rate * (target - self.Q[row, action])
+                values[row] = np.max(self.Q[row])
                 cumulative_step += 1
                 if cumulative_step % record_every == 0:
-                    self.evaluation_return.append(float(values[self.initial_state]))
+                    self.evaluation_return.append(base.values_at(self.initial_state, values))
                 state = successor
                 if terminated or truncated:
                     break
             self.epsilon = max(self.epsilon_lb, self.epsilon * self.epsilon_decay_rate)
         if cumulative_step % record_every != 0:
-            self.evaluation_return.append(float(values[self.initial_state]))
+            self.evaluation_return.append(base.values_at(self.initial_state, values))
         self.visit_counts = visits
         learnable_visits = visits[~base.terminal_mask]
         self.training_diagnostics = {
@@ -177,7 +187,7 @@ class Tabular_Agent:
             "minimum_visits": int(np.min(learnable_visits)),
             "unvisited_pairs": int(np.count_nonzero(learnable_visits == 0)),
             "bellman_residual": self.robust_bellman_residual(),
-            "initial_state_value": float(values[self.initial_state]),
-            "zero_initialized": True, "R": float(self.R), "C": float(self.C),
+            "initial_state_value": base.values_at(self.initial_state, values),
+            "zero_initialized": zero_initialized, "R": float(self.R), "C": float(self.C),
         }
         return self.Q.copy(), np.argmax(self.Q, axis=1)

@@ -5,7 +5,7 @@ import numpy as np
 
 
 def C_star_shift(episode, period=100):
-    """Slowly cycle within [0.5, 2.0], staying strictly above the half-cell threshold."""
+    """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
     phase = (episode % period + 0.5) / period
@@ -33,7 +33,7 @@ def randomize_obstacles(mdp, rng, n_obstacles=10):
     candidates = [
         (ix, iy) for iy in range(mdp.ny) for ix in range(mdp.nx)
         if all(max(abs(ix - sx), abs(iy - sy)) >= 2
-               for sx, sy in (mdp.start_cell, mdp.goal_cell))
+               for sx, sy in (mdp.start_state, mdp.goal_state))
     ]
     if len(candidates) < n_obstacles:
         raise ValueError(f"The grid has too few eligible cells for {n_obstacles} obstacles.")
@@ -53,8 +53,9 @@ def randomize_obstacles(mdp, rng, n_obstacles=10):
 
 def plot_robot_map(mdp, axis):
     """Draw the physical grid, obstacles, start, and goal on an existing axis."""
-    for state in range(mdp.n_grid_states):
-        ix, iy = mdp.state_to_cell(state)
+    for cell in mdp.states:
+        state = tuple(cell)
+        ix, iy = state
         color = "0.25" if mdp.obstacle_mask[iy, ix] else "none"
         if state == mdp.start_state:
             color = "lightskyblue"
@@ -78,16 +79,18 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     """Plot values, direction commands, and an optional continuous trajectory."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
     extent = (0, mdp.bounds[0], 0, mdp.bounds[1])
-    values = np.max(Q[:mdp.n_grid_states], axis=1).reshape(mdp.ny, mdp.nx)
+    values = np.max(Q, axis=1).reshape(mdp.ny, mdp.nx)
     image = axes[0].imshow(values, origin="lower", extent=extent, cmap="YlGnBu")
     fig.colorbar(image, ax=axes[0], label="Learned robust value")
     for axis in axes:
         plot_robot_map(mdp, axis)
     for state in mdp.trainable_states:
+        state = tuple(state)
+        row = mdp.state_index(state)
         x, y = mdp.coordinates(state)
         value_y = y - 0.2 * mdp.cell_widths[1] if state == mdp.start_state else y
-        axes[0].text(x, value_y, f"{np.max(Q[state]):.2f}", ha="center", va="center", fontsize=7)
-        direction = np.asarray(mdp.ACTION_DIRECTIONS[int(policy[state])])
+        axes[0].text(x, value_y, f"{np.max(Q[row]):.2f}", ha="center", va="center", fontsize=7)
+        direction = np.asarray(mdp.ACTION_DIRECTIONS[int(policy[row])])
         dx, dy = direction * mdp.cell_widths * 0.28
         axes[1].arrow(
             x, y, dx, dy, head_width=min(mdp.cell_widths) * 0.12,
@@ -96,7 +99,7 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     if trajectory is not None:
         trajectory = np.asarray(trajectory)
         axes[1].plot(trajectory[:, 0], trajectory[:, 1], "o-", color="tab:orange", markersize=3)
-        exits = np.array([mdp.discretize(x) == mdp.exit_state for x in trajectory])
+        exits = np.array([mdp.is_outside(mdp.discretize(x)) for x in trajectory])
         if np.any(exits):
             axes[1].plot(*trajectory[exits].T, "rx", markersize=9, label="Workspace exit")
             lo = np.minimum(np.min(trajectory, axis=0), 0) - 0.2 * mdp.cell_widths
@@ -139,7 +142,7 @@ def plot_conformal_history(history, delta):
     finite_radii = np.where(np.isfinite(radii), radii, np.nan)
     ceiling = max(1.0, np.nanmax(scores, initial=0),
                   np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
-    axes[1].plot(episodes, scores, label="Maximum nonterminal deviation")
+    axes[1].plot(episodes, scores, label="Maximum deviation")
     axes[1].plot(episodes, finite_radii, label="Conformal radius" if has_acp else "Fixed radius")
     if "C_star_k" in history[0]:
         support_bounds = [item["C_star_k"] for item in history]
@@ -156,9 +159,7 @@ def plot_conformal_history(history, delta):
         axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
         axes[2].set(title="ACP update", ylabel="Failure parameter")
         miscoverage = np.asarray([item["miscoverage"] for item in history], dtype=float)
-        miscoverage = np.ma.masked_invalid(miscoverage)
-        counts = (~np.ma.getmaskarray(miscoverage)).cumsum()
-        coverage = 1 - np.ma.divide(miscoverage.filled(0).cumsum(), counts)
+        coverage = 1 - np.cumsum(miscoverage) / episodes
         axes[3].plot(episodes, coverage, label="Conformal coverage")
         axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
         axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))

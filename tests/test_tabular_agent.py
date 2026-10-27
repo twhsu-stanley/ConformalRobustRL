@@ -16,12 +16,12 @@ def reference_q(mdp, gamma, R, C):
     for _ in range(2000):
         Q = np.zeros((mdp.n_state, 4))
         for state in mdp.trainable_states:
+            row = mdp.state_index(state)
             for action in range(4):
                 nominal = mdp.nominal_next_state(state, action)
-                candidates = mdp.localized_uncertainty_states(nominal, C)
-                worst_value = np.min(values[candidates])
-                continuation = (1 - R) * values[nominal] + R * worst_value
-                Q[state, action] = mdp.reward(state, action) + gamma * continuation
+                worst_value = mdp.worst_case_value(nominal, C, values)
+                continuation = (1 - R) * mdp.values_at(nominal, values) + R * worst_value
+                Q[row, action] = mdp.reward(state, action) + gamma * continuation
         updated = np.max(Q, axis=1)
         if np.max(np.abs(updated - values)) < 1e-12:
             return Q
@@ -36,11 +36,11 @@ class RobustQLearningTests(unittest.TestCase):
     def test_robust_target_and_limiting_cases(self):
         mdp = self.small_mdp()
         agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
-        values = np.array((0.4, 0.8, 0.2, 0.0, 0.0))
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values), 0.1 + 0.9 * 0.75 * 0.8)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, R=0), 0.82)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, C=0), 0.82)
-        self.assertAlmostEqual(agent.robust_td_target(0.1, 1, values, R=1, C=np.inf), 0.1)
+        values = np.array((0.4, 0.8, 0.2, 0.0))
+        self.assertAlmostEqual(agent.robust_td_target(0.1, (1, 0), values), 0.1 + 0.9 * 0.75 * 0.8)
+        self.assertAlmostEqual(agent.robust_td_target(0.1, (1, 0), values, R=0), 0.82)
+        self.assertAlmostEqual(agent.robust_td_target(0.1, (1, 0), values, C=0), 0.82)
+        self.assertAlmostEqual(agent.robust_td_target(0.1, (1, 0), values, R=1, C=np.inf), 0.1)
 
     def test_training_matches_reference_and_resets_initialization(self):
         mdp = self.small_mdp()
@@ -81,13 +81,30 @@ class RobustQLearningTests(unittest.TestCase):
     def test_agent_uses_the_MDP_uncertainty_set(self):
         mdp = self.small_mdp()
         agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
-        values = np.array((0.4, 0.8, 0.2, 0, 0))
+        values = np.array((0.4, 0.8, 0.2, 0))
         with patch.object(
-            mdp, "localized_uncertainty_states", return_value=np.array([2]),
+            mdp, "localized_uncertainty_states", return_value=np.array([(0, 1)]),
         ) as states:
-            target = agent.robust_td_target(0.1, 1, values)
-        states.assert_called_once_with(1, 0.6)
+            target = agent.robust_td_target(0.1, (1, 0), values)
+        states.assert_called_once_with((1, 0), 0.6)
         self.assertAlmostEqual(target, 0.1 + 0.9 * (0.75 * 0.8 + 0.25 * 0.2))
+
+    def test_custom_initialization_keeps_terminal_values_zero(self):
+        class WarmStartAgent(Tabular_Agent):
+            def initialize_q(self):
+                self.Q.fill(2.0)
+
+        mdp = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), max_episode_steps=1, movement_reward=0,
+        )
+        agent = WarmStartAgent(mdp, 0.9, 0.5, epsilon_init=0, epsilon_lb=0, seed=1)
+        agent.robust_q_learning(1, exploring_starts=False)
+        np.testing.assert_array_equal(agent.Q[mdp.terminal_mask], 0)
+        np.testing.assert_array_equal(agent.visit_counts[mdp.terminal_mask], 0)
+        np.testing.assert_allclose(agent.Q[agent.visit_counts > 0], 1.9)
+        self.assertEqual(agent.evaluation_return[0], 2.0)
+        self.assertFalse(agent.training_diagnostics["zero_initialized"])
+        self.assertEqual(mdp.values_at((-1, 0), agent.Q.max(axis=1)), 0)
 
     def test_environment_must_supply_the_MDP_definitions(self):
         env = gym.make("FrozenLake-v1", is_slippery=False, max_episode_steps=20)

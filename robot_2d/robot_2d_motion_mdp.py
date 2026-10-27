@@ -1,4 +1,4 @@
-"""Continuous robot motion with a finite grid model for robust reinforcement learning."""
+"""Robot motion on a global grid with a finite workspace Q-table."""
 
 from collections import deque
 
@@ -10,18 +10,19 @@ from gymnasium import spaces
 class Robot2DMotionMDP(gym.Env):
     """A grid robot MDP with separate nominal and uncertain rollout instances.
 
-    Cells are indexed by (ix, iy), with state = ix + nx * iy. Actions 0, 1, 2, 3
+    States are integer grid coordinates (ix, iy), including outside the workspace.
+    Workspace states have Q-table row ix + nx * iy. Actions 0, 1, 2, 3
     command +x, -x, +y, -y, respectively. Rewards depend on (state, action), even
     during uncertain deployment. Goal and obstacle cells have nominal self-loops.
     Deployment applies noise to every observed transition and stops at the goal,
     an obstacle, workspace exit, or the episode step limit.
-    Outside grid cells share one zero-valued outcome in the finite planning model.
+    Every outside cell is a distinct terminal state with implicit value zero.
 
     A custom noise_sampler(nominal_position, rng) returns a bounded 2-D deviation.
     The default sampler mixes zero deviation with uniform noise in a disk.
     Noise is never projected or resampled. Segment contacts stop uncertain rollouts
     at the first terminal cell. Mismatches use the original sampled endpoint.
-    The final transition is recorded but excluded from ACP when it is terminal.
+    Every sampled disturbance, including the terminal one, enters the ACP score.
     """
 
     metadata = {"render_modes": []}
@@ -44,10 +45,9 @@ class Robot2DMotionMDP(gym.Env):
         self.nx, self.ny = map(int, shape)
         self.grid_shape = (self.nx, self.ny)
         self.cell_widths = self.bounds / shape
-        self.n_grid_states = self.nx * self.ny
-        self.exit_state = self.n_grid_states
-        self.n_state = self.n_grid_states + 1
-        self.observation_space = spaces.Discrete(self.n_state)
+        self.n_state = self.nx * self.ny
+        limits = np.iinfo(np.int64)
+        self.observation_space = spaces.Box(limits.min, limits.max, shape=(2,), dtype=np.int64)
         self.action_space = spaces.Discrete(4)
         if not isinstance(max_episode_steps, (int, np.integer)) or max_episode_steps < 1:
             raise ValueError("max_episode_steps must be a positive integer.")
@@ -68,17 +68,17 @@ class Robot2DMotionMDP(gym.Env):
         if obstacles is None:
             obstacles = self.DEFAULT_OBSTACLES if self.grid_shape == (8, 8) else ()
         self.obstacle_mask = np.zeros((self.ny, self.nx), dtype=bool)
-        self.start_cell = self._validate_cell(start_cell)
+        self.start_state = self._validate_state(start_cell)
         goal_cell = (self.nx - 1, self.ny - 1) if goal_cell is None else goal_cell
-        self.goal_cell = self._validate_cell(goal_cell)
-        self.start_state = self.cell_to_state(self.start_cell)
-        self.goal_state = self.cell_to_state(self.goal_cell)
+        self.goal_state = self._validate_state(goal_cell)
+        self.state_index(self.start_state)
+        self.state_index(self.goal_state)
         if self.start_state == self.goal_state:
             raise ValueError("Start and goal must be different cells.")
-        states = np.arange(self.n_grid_states)
-        indices = np.column_stack((states % self.nx, states // self.nx))
-        self.state_coordinates = np.vstack(((indices + 0.5) * self.cell_widths, [np.nan, np.nan]))
-        self.nominal_transitions = np.zeros((self.n_state, 4), dtype=int)
+        rows = np.arange(self.n_state)
+        self.states = np.column_stack((rows % self.nx, rows // self.nx))
+        self.state_coordinates = (self.states + 0.5) * self.cell_widths
+        self.nominal_transitions = np.zeros((self.n_state, 4, 2), dtype=int)
         self.rewards = np.zeros((self.n_state, 4), dtype=float)
         self.boundary_commands = np.zeros((self.n_state, 4), dtype=bool)
         self.set_obstacles(obstacles)
@@ -90,65 +90,61 @@ class Robot2DMotionMDP(gym.Env):
             raise ValueError(f"{name} must be in [0, 1].")
         return float(value)
 
-    def _validate_cell(self, cell):
-        values = np.asarray(cell)
-        if values.shape != (2,) or np.any(values != values.astype(int)):
-            raise ValueError("A cell must be a pair of integer indices (ix, iy).")
-        ix, iy = map(int, values)
-        if not 0 <= ix < self.nx or not 0 <= iy < self.ny:
-            raise ValueError(f"Cell {(ix, iy)} is outside the grid.")
-        return ix, iy
-
     def _validate_state(self, state):
-        if not self.observation_space.contains(state):
-            raise ValueError(f"Invalid state: {state}.")
-        return int(state)
+        values = np.asarray(state)
+        if values.shape != (2,) or not np.all(np.isfinite(values)):
+            raise ValueError("A state must be a pair of finite integer grid coordinates.")
+        if np.any(values != np.floor(values)):
+            raise ValueError("A state must have integer grid coordinates.")
+        return tuple(map(int, values))
 
     def _validate_action(self, action):
         if not self.action_space.contains(action):
             raise ValueError(f"Invalid action: {action}.")
         return int(action)
 
-    def cell_to_state(self, cell):
-        ix, iy = self._validate_cell(cell)
-        return ix + self.nx * iy
-
-    def state_to_cell(self, state):
+    def state_index(self, state):
+        """Map a workspace state to its finite Q-table row."""
         state = self._validate_state(state)
-        if state == self.exit_state:
-            raise ValueError("The workspace-exit state is not a grid cell.")
-        return state % self.nx, state // self.nx
+        if self.is_outside(state):
+            raise ValueError(f"Outside state {state} has no Q-table row.")
+        return state[0] + self.nx * state[1]
+
+    def is_outside(self, state):
+        return not (0 <= state[0] < self.nx and 0 <= state[1] < self.ny)
+
+    def is_terminal(self, state):
+        return self.is_outside(state) or bool(self.terminal_mask[self.state_index(state)])
 
     def coordinates(self, state):
-        state = self._validate_state(state)
-        if state == self.exit_state:
-            raise ValueError("The workspace-exit state has no cell center.")
-        return self.state_coordinates[state].copy()
+        return (np.asarray(self._validate_state(state)) + 0.5) * self.cell_widths
 
-    def quantize(self, position):
-        """Return Phi inside closed X, retaining outside cell centers for diagnostics."""
+    def discretize(self, position):
+        """Global Phi: half-open cells partition the plane, including outside X."""
         position = np.asarray(position, dtype=float)
         if position.shape != (2,) or not np.all(np.isfinite(position)):
             raise ValueError("A continuous position must be a finite 2-D vector.")
-        centers = (np.floor(position / self.cell_widths) + 0.5) * self.cell_widths
-        upper_centers = self.bounds - self.cell_widths / 2
-        return np.where(position <= self.bounds, np.minimum(centers, upper_centers), centers)
+        return tuple(map(int, np.floor(position / self.cell_widths)))
 
-    def discretize(self, position):
-        """Return the index of Phi+(x), with exit only outside the closed workspace."""
-        position = np.asarray(position, dtype=float)
-        center = self.quantize(position)
-        if np.any(position < 0) or np.any(position > self.bounds):
-            return self.exit_state
-        indices = np.rint(center / self.cell_widths - 0.5).astype(int)
-        return int(indices[0] + self.nx * indices[1])
+    def values_at(self, states, values):
+        """Look up workspace values; all terminal states, including outside cells, give zero."""
+        states = np.asarray(states)
+        if states.shape[-1:] != (2,) or not np.issubdtype(states.dtype, np.integer):
+            raise ValueError("States must be integer grid-coordinate pairs.")
+        inside = np.all((states >= 0) & (states < self.grid_shape), axis=-1)
+        result = np.zeros(states.shape[:-1])
+        if np.any(inside):
+            selected = states[inside]
+            rows = selected[:, 0] + self.nx * selected[:, 1]
+            result[inside] = np.where(self.terminal_mask[rows], 0.0, values[rows])
+        return float(result) if result.ndim == 0 else result
 
     def _validate_path(self):
-        queue = deque([self.start_cell])
-        visited = {self.start_cell}
+        queue = deque([self.start_state])
+        visited = {self.start_state}
         while queue:
             cell = queue.popleft()
-            if cell == self.goal_cell:
+            if cell == self.goal_state:
                 return
             for dx, dy in self.ACTION_DIRECTIONS:
                 neighbor = (cell[0] + dx, cell[1] + dy)
@@ -164,11 +160,12 @@ class Robot2DMotionMDP(gym.Env):
         """Update the map between episodes, rebuilding its terminal and reward tables."""
         mask = np.zeros((self.ny, self.nx), dtype=bool)
         for cell in obstacles:
-            ix, iy = self._validate_cell(cell)
+            ix, iy = self._validate_state(cell)
+            self.state_index((ix, iy))
             mask[iy, ix] = True
-        if mask[self.start_cell[1], self.start_cell[0]]:
+        if mask[self.start_state[1], self.start_state[0]]:
             raise ValueError("Start cannot be an obstacle.")
-        if mask[self.goal_cell[1], self.goal_cell[0]]:
+        if mask[self.goal_state[1], self.goal_state[0]]:
             raise ValueError("Goal cannot be an obstacle.")
         previous = self.obstacle_mask
         self.obstacle_mask = mask
@@ -177,65 +174,71 @@ class Robot2DMotionMDP(gym.Env):
         except ValueError:
             self.obstacle_mask = previous
             raise
-        self.terminal_mask = np.append(mask.ravel(), True)
-        self.terminal_mask[self.goal_state] = True
-        self.trainable_states = np.flatnonzero(~self.terminal_mask)
+        self.terminal_mask = mask.ravel().copy()
+        self.terminal_mask[self.state_index(self.goal_state)] = True
+        self.trainable_states = self.states[~self.terminal_mask]
         self.rewards.fill(0.0)
         self.boundary_commands.fill(False)
         self._build_nominal_model()
 
     def _build_nominal_model(self):
-        for state in range(self.n_state):
-            if self.terminal_mask[state]:
-                self.nominal_transitions[state, :] = state
+        for row, state in enumerate(self.states):
+            if self.terminal_mask[row]:
+                self.nominal_transitions[row, :] = state
                 continue
-            ix, iy = self.state_to_cell(state)
+            ix, iy = state
             for action, (dx, dy) in enumerate(self.ACTION_DIRECTIONS):
-                self.nominal_transitions[state, action] = state
+                self.nominal_transitions[row, action] = state
                 cell = (ix + dx, iy + dy)
                 if not 0 <= cell[0] < self.nx or not 0 <= cell[1] < self.ny:
-                    self.boundary_commands[state, action] = True
+                    self.boundary_commands[row, action] = True
                     continue
-                next_state = self.cell_to_state(cell)
-                self.nominal_transitions[state, action] = next_state
-                if next_state == self.goal_state:
-                    self.rewards[state, action] = self.goal_reward
-                elif not self.terminal_mask[next_state]:
-                    self.rewards[state, action] = self.movement_reward
+                self.nominal_transitions[row, action] = cell
+                if cell == self.goal_state:
+                    self.rewards[row, action] = self.goal_reward
+                elif not self.is_terminal(cell):
+                    self.rewards[row, action] = self.movement_reward
 
     def nominal_next_state(self, state, action):
         state, action = self._validate_state(state), self._validate_action(action)
-        return int(self.nominal_transitions[state, action])
+        if self.is_terminal(state):
+            return state
+        return tuple(self.nominal_transitions[self.state_index(state), action])
 
     def nominal_next_position(self, state, action):
         return self.coordinates(self.nominal_next_state(state, action))
 
     def reward(self, state, action):
-        return float(self.rewards[self._validate_state(state), self._validate_action(action)])
+        state, action = self._validate_state(state), self._validate_action(action)
+        if self.is_terminal(state):
+            return 0.0
+        return float(self.rewards[self.state_index(state), action])
 
     def localized_uncertainty_states(self, nominal_next_state, C):
-        """Return states whose cell or exit region has distance at most C, as in (5)."""
-        if np.isnan(C) or C < 0:
-            raise ValueError("Deviation radius must be nonnegative, or positive infinity.")
+        """Enumerate the finite-C neighborhood over the global grid, using equation (4)."""
+        if not np.isfinite(C) or C < 0:
+            raise ValueError("An explicit neighborhood requires finite nonnegative C.")
         nominal_next_state = self._validate_state(nominal_next_state)
         cache = self.__dict__.setdefault("_uncertainty_cache", {})
         key = (nominal_next_state, float(C))
         if key in cache:
             return cache[key]
-        if np.isposinf(C):
-            states = np.arange(self.n_state)
-        elif nominal_next_state == self.exit_state:
-            states = np.array([self.exit_state])
-        else:
-            center = self.coordinates(nominal_next_state)
-            offsets = np.abs(self.state_coordinates[:self.n_grid_states] - center)
-            distances = np.linalg.norm(np.maximum(offsets - self.cell_widths / 2, 0), axis=1)
-            states = np.flatnonzero(distances <= C + 1e-12)
-            exit_distance = min(np.min(center), np.min(self.bounds - center))
-            if exit_distance <= C + 1e-12:
-                states = np.append(states, self.exit_state)
+        reach = np.floor((C + 1e-12) / self.cell_widths + 0.5).astype(int)
+        axes = [np.arange(s - r, s + r + 1) for s, r in zip(nominal_next_state, reach)]
+        xs, ys = np.meshgrid(*axes)
+        candidates = np.column_stack((xs.ravel(), ys.ravel()))
+        offsets = np.abs(candidates - nominal_next_state) * self.cell_widths
+        distances = np.linalg.norm(np.maximum(offsets - self.cell_widths / 2, 0), axis=1)
+        states = candidates[distances <= C + 1e-12]
         cache[key] = states
         return states
+
+    def worst_case_value(self, nominal_next_state, C, values):
+        """Evaluate the local minimum; infinitely many outside terminal values are zero."""
+        if np.isposinf(C):
+            return min(0.0, float(np.min(self.values_at(self.states, values))))
+        states = self.localized_uncertainty_states(nominal_next_state, C)
+        return float(np.min(self.values_at(states, values)))
 
     def reset(self, *, seed=None, options=None):
         """Reset to a nonterminal start; an explicit seed restarts the disturbance RNG."""
@@ -248,13 +251,13 @@ class Robot2DMotionMDP(gym.Env):
             state = self.discretize(position)
         else:
             state = self._validate_state(options.get("state", self.start_state))
-        if self.terminal_mask[state]:
+        if self.is_terminal(state):
             raise ValueError("An episode must start at a nonterminal state inside the workspace.")
         self.s = state
         self.position = position.copy() if "position" in options else self.coordinates(state)
         self.elapsed_steps = 0
         self._episode_finished = False
-        return self.s, {"position": self.position.copy()}
+        return np.asarray(self.s, dtype=np.int64), {"position": self.position.copy()}
 
     def _sample_deviation(self, nominal_position):
         if self.noise_sampler is not None:
@@ -302,7 +305,7 @@ class Robot2DMotionMDP(gym.Env):
                 for y in ys:
                     if not 0 <= x < self.nx or not 0 <= y < self.ny:
                         continue
-                    state = x + self.nx * y
+                    state = (x, y)
                     if self.obstacle_mask[y, x]:
                         return state, position
                     goal_contact |= state == self.goal_state
@@ -331,57 +334,55 @@ class Robot2DMotionMDP(gym.Env):
             contact = self._collision_check_segment(self.position, next_position)
         self.s, self.position = (next_state, next_position) if contact is None else contact
         self.elapsed_steps += 1
-        terminated = bool(self.terminal_mask[self.s])
+        terminated = self.is_terminal(self.s)
         truncated = self.elapsed_steps >= self.max_episode_steps and not terminated
         self._episode_finished = terminated or truncated
         info = {
             "position": self.position.copy(), "nominal_state": nominal_state,
             "nominal_position": nominal_position, "deviation": deviation,
-            "quantized_position": self.quantize(self.position),
             "deviation_norm": float(np.linalg.norm(deviation)),
             "mismatch": next_state != nominal_state, "goal_reached": self.s == self.goal_state,
             "collision": bool(
-                self.s < self.n_grid_states and self.obstacle_mask.ravel()[self.s]
+                not self.is_outside(self.s) and self.obstacle_mask[self.s[1], self.s[0]]
             ),
-            "workspace_exit": self.s == self.exit_state,
-            "boundary_attempt": bool(self.boundary_commands[state, action]),
-            "boundary_violation": next_state == self.exit_state,
+            "workspace_exit": self.is_outside(self.s),
+            "boundary_attempt": bool(self.boundary_commands[self.state_index(state), action]),
+            "boundary_violation": self.is_outside(next_state),
         }
-        return self.s, self.reward(state, action), terminated, truncated, info
+        return (
+            np.asarray(self.s, dtype=np.int64), self.reward(state, action),
+            terminated, truncated, info,
+        )
 
     def deploy_policy(self, policy, gamma, start_position=None):
-        """Record all transitions; score nonterminal ones, or None if there are none."""
+        """Record each transition and score every disturbance, including the terminal one."""
         options = None if start_position is None else {"position": start_position}
         _, info = self.reset(options=options)
         positions, states = [info["position"].copy()], [self.s]
         actions, rewards, deviations = [], [], []
         mismatches, nominal_positions, deviation_vectors = [], [], []
-        quantized_positions = []
         boundary_attempts, boundary_violations = 0, 0
-        score = None
+        score = 0.0
         while True:
             state = self.s
-            action = int(policy(state) if callable(policy) else policy[state])
+            action = int(policy(state) if callable(policy) else policy[self.state_index(state)])
             successor, reward, terminated, truncated, info = self.step(action)
             nominal_positions.append(info["nominal_position"].copy())
             deviation_vectors.append(info["deviation"].copy())
             positions.append(info["position"].copy())
             states.append(successor)
-            quantized_positions.append(info["quantized_position"])
             actions.append(action)
             rewards.append(float(reward))
             deviations.append(info["deviation_norm"])
             mismatches.append(int(info["mismatch"]))
             boundary_attempts += int(info["boundary_attempt"])
             boundary_violations += int(info["boundary_violation"])
-            if not terminated:
-                score = max(0.0 if score is None else score, info["deviation_norm"])
+            score = max(score, info["deviation_norm"])
             if terminated or truncated:
                 break
         length = len(actions)
         return {
             "states": np.asarray(states), "positions": np.asarray(positions),
-            "quantized_positions": np.asarray(quantized_positions),
             "nominal_positions": np.asarray(nominal_positions), "actions": np.asarray(actions),
             "deviation_vectors": np.asarray(deviation_vectors),
             "rewards": np.asarray(rewards), "deviations": np.asarray(deviations),
@@ -402,7 +403,7 @@ class Robot2DMotionMDP(gym.Env):
         horizon = self.max_episode_steps if max_episode_steps is None else max_episode_steps
         return Robot2DMotionMDP(
             x_max=self.bounds[0], y_max=self.bounds[1], grid_shape=self.grid_shape,
-            obstacles=obstacle_cells, start_cell=self.start_cell, goal_cell=self.goal_cell,
+            obstacles=obstacle_cells, start_cell=self.start_state, goal_cell=self.goal_state,
             movement_reward=self.movement_reward, goal_reward=self.goal_reward,
             noise_probability=0.0 if nominal else self.noise_probability,
             noise_radius=self.noise_radius, noise_sampler=None if nominal else self.noise_sampler,

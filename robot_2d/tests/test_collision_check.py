@@ -25,11 +25,11 @@ class SegmentCollisionTests(unittest.TestCase):
         for start, end, expected in cases:
             with self.subTest(start=start, end=end):
                 state, position = mdp._collision_check_segment(start, end)
-                self.assertEqual(state, mdp.cell_to_state((2, 1)))
+                self.assertEqual(state, (2, 1))
                 np.testing.assert_allclose(position, expected)
         rectangular = Robot2DMotionMDP(x_max=16, y_max=8, obstacles=[(2, 1)])
         state, position = rectangular._collision_check_segment((1, 1.5), (9, 1.5))
-        self.assertEqual(state, rectangular.cell_to_state((2, 1)))
+        self.assertEqual(state, (2, 1))
         np.testing.assert_allclose(position, (4, 1.5))
 
     def test_corner_grazing_grid_lines_and_boundary_endpoints(self):
@@ -42,14 +42,14 @@ class SegmentCollisionTests(unittest.TestCase):
         ):
             with self.subTest(start=start, end=end):
                 state, _ = mdp._collision_check_segment(start, end)
-                self.assertEqual(state, mdp.cell_to_state((1, 0)))
+                self.assertEqual(state, (1, 0))
         self.assertIsNone(mdp._collision_check_segment((0.5, 0.5), (0.5, 0.5)))
         self.assertIsNone(mdp._collision_check_segment((0.5, 2.5), (0.5, 2.5)))
         self.assertIsNone(mdp._collision_check_segment((0.5, 0.5), (-3, 0.5)))
         self.assertIsNone(mdp._collision_check_segment((0.5, 2.5), (8, 2.5)))
         self.assertIsNone(mdp._collision_check_segment((0.5, 0.5), (1.5, 1.500001)))
         state, _ = mdp._collision_check_segment((0.5, 0.5), (1.5, 1.499999))
-        self.assertEqual(state, mdp.cell_to_state((1, 0)))
+        self.assertEqual(state, (1, 0))
 
     def test_first_terminal_event_and_obstacle_priority_at_a_corner(self):
         mdp = Robot2DMotionMDP(goal_cell=(3, 1), obstacles=[(5, 1)])
@@ -57,17 +57,17 @@ class SegmentCollisionTests(unittest.TestCase):
         self.assertEqual(state, mdp.goal_state)
         np.testing.assert_allclose(position, (3, 1.5))
         state, position = mdp._collision_check_segment((7.5, 1.5), (0.5, 1.5))
-        self.assertEqual(state, mdp.cell_to_state((5, 1)))
+        self.assertEqual(state, (5, 1))
         np.testing.assert_allclose(position, (6, 1.5))
         mdp = Robot2DMotionMDP(goal_cell=(1, 1), obstacles=[(1, 0)])
         state, position = mdp._collision_check_segment((0.5, 0.5), (1.5, 1.5))
-        self.assertEqual(state, mdp.cell_to_state((1, 0)))
+        self.assertEqual(state, (1, 0))
         np.testing.assert_allclose(position, (1, 1))
 
     def test_traversal_matches_independent_rectangle_intersections(self):
         mdp = Robot2DMotionMDP(x_max=16, obstacles=[(2, 1), (3, 4), (5, 6)])
         rng = np.random.default_rng(37)
-        terminal_states = np.flatnonzero(mdp.terminal_mask[:mdp.n_grid_states])
+        terminal_states = [tuple(s) for s in mdp.states[mdp.terminal_mask]]
         for _ in range(150):
             start = rng.uniform(0, mdp.bounds)
             end = rng.uniform(-mdp.cell_widths, mdp.bounds + mdp.cell_widths)
@@ -92,20 +92,20 @@ class SegmentCollisionTests(unittest.TestCase):
     def test_very_long_segments_do_not_merge_distinct_grid_crossings(self):
         mdp = Robot2DMotionMDP(obstacles=[(1, 1)])
         state, position = mdp._collision_check_segment((0.5, 0.5), (1e12, 2e12))
-        self.assertEqual(state, mdp.cell_to_state((1, 1)))
+        self.assertEqual(state, (1, 1))
         np.testing.assert_allclose(position, (1, 1.5), atol=1e-11)
 
     def test_nominal_training_keeps_its_existing_endpoint_transitions(self):
         mdp = Robot2DMotionMDP(obstacles=[(1, 0)])
         with patch.object(mdp, "_collision_check_segment", side_effect=AssertionError):
             state, _, terminated, _, _ = mdp.step(0)
-        self.assertEqual(state, mdp.cell_to_state((1, 0)))
+        np.testing.assert_array_equal(state, (1, 0))
         np.testing.assert_allclose(mdp.position, (1.5, 0.5))
         self.assertTrue(terminated)
 
 
 class ContactCalibrationTests(unittest.TestCase):
-    def test_terminal_disturbance_is_excluded_for_obstacle_goal_and_exit(self):
+    def test_terminal_disturbance_is_scored_for_obstacle_goal_and_exit(self):
         for outcome in ("collision", "goal_reached", "workspace_exit"):
             with self.subTest(outcome=outcome):
                 samples = iter(((0.1, 0), (10 if outcome == "workspace_exit" else 1.5, 0)))
@@ -117,8 +117,8 @@ class ContactCalibrationTests(unittest.TestCase):
                 record = mdp.deploy_policy(np.zeros(mdp.n_state, dtype=int), 0.95)
                 self.assertTrue(record[outcome])
                 self.assertEqual(record["episode_length"], 2)
-                self.assertEqual(record["score"], 0.1)
-                self.assertGreater(record["deviations"][-1], record["score"])
+                self.assertEqual(record["score"], record["deviations"][-1])
+                self.assertGreater(record["score"], 0.1)
                 self.assertEqual(record["episode_mismatches"], 1)
                 if outcome != "workspace_exit":
                     np.testing.assert_allclose(record["positions"][-1], (3, 0.5))
@@ -133,7 +133,7 @@ class ContactCalibrationTests(unittest.TestCase):
         self.assertTrue(record["timeout"])
         self.assertEqual(record["score"], 0.4)
 
-    def test_first_step_contact_keeps_endpoint_mismatch_and_skips_ACP(self):
+    def test_first_step_contact_keeps_endpoint_mismatch_and_updates_ACP(self):
         mdp = Robot2DMotionMDP(
             obstacles=[(1, 0)], noise_sampler=lambda position, rng: np.array((1.0, 0)),
         )
@@ -146,19 +146,21 @@ class ContactCalibrationTests(unittest.TestCase):
             controller.run(2)
         for record in controller.history:
             record["training"]["bellman_residual"] = 0.0
-            self.assertEqual(record["states"][-1], mdp.nominal_next_state(mdp.start_state, 0))
+            np.testing.assert_array_equal(
+                record["states"][-1], mdp.nominal_next_state(mdp.start_state, 0),
+            )
             np.testing.assert_allclose(record["positions"][-1], (1, 0.5))
             np.testing.assert_allclose(
                 record["nominal_positions"][-1] + record["deviation_vectors"][-1], (2.5, 0.5),
             )
             self.assertEqual(record["episode_mismatches"], 1)
-            self.assertIsNone(record["score"])
-            self.assertIsNone(record["miscoverage"])
-            self.assertEqual(record["delta_next"], record["delta_k"])
+            self.assertEqual(record["score"], 1.0)
+            self.assertEqual(record["miscoverage"], 1)
+            self.assertAlmostEqual(record["delta_next"], record["delta_k"] - 0.008)
         self.assertEqual(controller.transition_count, 2)
         self.assertEqual(controller.R_hat, 1)
-        self.assertEqual(controller.acp.n_updates, 0)
-        self.assertEqual(list(controller.acp.scores), [0.1] * 10)
+        self.assertEqual(controller.acp.n_updates, 2)
+        self.assertEqual(list(controller.acp.scores), [0.1] * 10 + [1.0, 1.0])
         run = {
             "mdp": controller.deployment_env, "history": controller.history,
             "initial_calibration_scores": controller.initial_calibration_scores,
@@ -170,21 +172,21 @@ class ContactCalibrationTests(unittest.TestCase):
                 figure.canvas.draw()
                 if len(figure.axes) == 6:
                     coverage = np.ma.asarray(figure.axes[3].lines[0].get_ydata()).filled(np.nan)
-                    self.assertTrue(np.all(np.isnan(coverage)))
+                    np.testing.assert_array_equal(coverage, [0, 0])
                 else:
-                    self.assertEqual(len(figure.axes), 3)
-                    self.assertTrue(np.all(np.isnan(figure.axes[0].lines[0].get_ydata())))
-                    np.testing.assert_allclose(figure.axes[2].lines[0].get_ydata(), [0.2, 0.2])
+                    self.assertEqual(len(figure.axes), 2)
+                    np.testing.assert_array_equal(figure.axes[0].lines[0].get_ydata(), [1, 1])
+                    np.testing.assert_allclose(figure.axes[1].lines[0].get_ydata(), [0.2, 0.192])
             finally:
                 plt.close(figure)
 
-    def test_pilots_skip_empty_episodes_but_include_observed_zero_scores(self):
+    def test_every_pilot_including_a_zero_score_enters_calibration(self):
         controller = ConformallyRobustController(Robot2DMotionMDP(), pilot_episodes=3)
-        records = [{"score": None}, {"score": 0}, {"score": 0.4}]
+        records = [{"score": 0.2}, {"score": 0}, {"score": 0.4}]
         with patch.object(controller.deployment_env, "deploy_policy", side_effect=records):
             controller.initialize_calibration()
-        self.assertEqual(controller.pilot_scores, [0, 0.4])
-        self.assertEqual(list(controller.acp.scores), [0, 0.4])
+        self.assertEqual(controller.pilot_scores, [0.2, 0, 0.4])
+        self.assertEqual(list(controller.acp.scores), [0.2, 0, 0.4])
         self.assertEqual(controller.transition_count, 0)
 
 

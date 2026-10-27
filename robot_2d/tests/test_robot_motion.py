@@ -50,41 +50,42 @@ class RobotMotionModelTests(unittest.TestCase):
 
     def test_coordinates_quantization_and_bounds(self):
         mdp = Robot2DMotionMDP(x_max=16, y_max=8)
-        np.testing.assert_allclose(mdp.coordinates(0), (1, 0.5))
-        np.testing.assert_allclose(mdp.coordinates(63), (15, 7.5))
-        for state in range(64):
-            self.assertEqual(mdp.discretize(mdp.coordinates(state)), state)
-        self.assertEqual(mdp.discretize((15.99, 7.99)), 63)
-        self.assertEqual(mdp.discretize((16, 8)), 63)
-        self.assertEqual(mdp.discretize((16, 0)), 7)
-        self.assertEqual(mdp.discretize((0, 8)), 56)
-        self.assertEqual(mdp.discretize((0, 0)), 0)
-        self.assertEqual(mdp.discretize((2, 1)), 9)
-        self.assertEqual(mdp.discretize((np.nextafter(16.0, np.inf), 8)), mdp.exit_state)
-        self.assertEqual(mdp.discretize((16, np.nextafter(8.0, np.inf))), mdp.exit_state)
-        self.assertEqual(mdp.discretize((-0.01, 0)), mdp.exit_state)
-        np.testing.assert_allclose(mdp.quantize((-0.01, 0)), (-1, 0.5))
-        np.testing.assert_allclose(mdp.quantize((16, 8)), (15, 7.5))
+        np.testing.assert_allclose(mdp.coordinates((0, 0)), (1, 0.5))
+        np.testing.assert_allclose(mdp.coordinates((7, 7)), (15, 7.5))
+        for state in mdp.states:
+            np.testing.assert_array_equal(mdp.discretize(mdp.coordinates(state)), state)
+        self.assertEqual(mdp.discretize((15.99, 7.99)), (7, 7))
+        self.assertEqual(mdp.discretize((16, 8)), (8, 8))
+        self.assertEqual(mdp.discretize((16, 0)), (8, 0))
+        self.assertEqual(mdp.discretize((0, 8)), (0, 8))
+        self.assertEqual(mdp.discretize((0, 0)), (0, 0))
+        self.assertEqual(mdp.discretize((2, 1)), (1, 1))
+        self.assertEqual(mdp.discretize((np.nextafter(16.0, np.inf), 8)), (8, 8))
+        self.assertEqual(mdp.discretize((16, np.nextafter(8.0, np.inf))), (8, 8))
+        self.assertEqual(mdp.discretize((-0.01, 0)), (-1, 0))
+        self.assertEqual(mdp.discretize((-2.01, 0)), (-2, 0))
+        np.testing.assert_allclose(mdp.coordinates((-1, 0)), (-1, 0.5))
+        np.testing.assert_allclose(mdp.coordinates((8, 8)), (17, 8.5))
 
     def test_reset_rejects_terminal_states_and_positions(self):
         mdp = Robot2DMotionMDP()
-        obstacle = mdp.cell_to_state((2, 1))
-        for state in (mdp.goal_state, obstacle, mdp.exit_state):
+        obstacle = (2, 1)
+        for state in (mdp.goal_state, obstacle, (-1, 0), (8, 0)):
             with self.subTest(state=state), self.assertRaisesRegex(ValueError, "nonterminal"):
                 mdp.reset(options={"state": state})
-        for position in (mdp.coordinates(mdp.goal_state), mdp.coordinates(obstacle), (8.1, 0)):
+        for position in (mdp.coordinates(mdp.goal_state), mdp.coordinates(obstacle), (8, 0.5)):
             with self.subTest(position=position), self.assertRaisesRegex(ValueError, "nonterminal"):
                 mdp.reset(options={"position": position})
-        state, info = mdp.reset(options={"position": (8, 0.5)})
-        self.assertEqual(state, mdp.cell_to_state((7, 0)))
-        np.testing.assert_array_equal(info["position"], (8, 0.5))
+        state, info = mdp.reset(options={"position": (7.99, 0.5)})
+        np.testing.assert_array_equal(state, (7, 0))
+        np.testing.assert_array_equal(info["position"], (7.99, 0.5))
 
     def test_direction_commands_snap_to_centers(self):
         mdp = Robot2DMotionMDP()
-        state = mdp.cell_to_state((3, 2))
+        state = (3, 2)
         expected_cells = ((4, 2), (2, 2), (3, 3), (3, 1))
         for action, expected in enumerate(expected_cells):
-            self.assertEqual(mdp.nominal_next_state(state, action), mdp.cell_to_state(expected))
+            self.assertEqual(mdp.nominal_next_state(state, action), expected)
         mdp.reset(options={"position": (3.2, 2.7)})
         successor, _, _, _, info = mdp.step(0)
         np.testing.assert_allclose(info["position"], mdp.coordinates(successor))
@@ -92,18 +93,18 @@ class RobotMotionModelTests(unittest.TestCase):
     def test_collision_goal_and_boundary_rewards(self):
         mdp = Robot2DMotionMDP(obstacles=[(1, 0)])
         successor, reward, terminated, _, info = mdp.step(0)
-        self.assertEqual(successor, 1)
+        np.testing.assert_array_equal(successor, (1, 0))
         self.assertEqual(reward, 0)
         self.assertTrue(terminated and info["collision"])
         mdp.reset()
         successor, reward, terminated, _, info = mdp.step(1)
-        self.assertEqual(successor, mdp.start_state)
+        np.testing.assert_array_equal(successor, mdp.start_state)
         self.assertEqual(reward, 0)
         self.assertFalse(terminated)
         self.assertTrue(info["boundary_attempt"])
-        mdp.reset(options={"state": mdp.cell_to_state((6, 7))})
+        mdp.reset(options={"state": (6, 7)})
         successor, reward, terminated, _, info = mdp.step(0)
-        self.assertEqual(successor, mdp.goal_state)
+        np.testing.assert_array_equal(successor, mdp.goal_state)
         self.assertEqual(reward, 1)
         self.assertTrue(terminated and info["goal_reached"])
 
@@ -119,7 +120,7 @@ class RobotMotionModelTests(unittest.TestCase):
     def test_subcell_deviation_is_not_a_discrete_mismatch(self):
         mdp = Robot2DMotionMDP(noise_sampler=lambda position, rng: np.array((0.2, 0.0)))
         successor, _, _, _, info = mdp.step(0)
-        self.assertEqual(successor, mdp.nominal_next_state(mdp.start_state, 0))
+        np.testing.assert_array_equal(successor, mdp.nominal_next_state(mdp.start_state, 0))
         self.assertFalse(info["mismatch"])
         self.assertAlmostEqual(info["deviation_norm"], 0.2)
 
@@ -129,7 +130,7 @@ class RobotMotionModelTests(unittest.TestCase):
         )
         successor, _, terminated, _, info = mdp.step(1)
         np.testing.assert_allclose(info["position"], (10.5, 0.5))
-        self.assertEqual(successor, mdp.exit_state)
+        np.testing.assert_array_equal(successor, (10, 0))
         self.assertTrue(terminated)
         self.assertTrue(info["workspace_exit"])
         self.assertTrue(info["boundary_violation"])
@@ -137,23 +138,27 @@ class RobotMotionModelTests(unittest.TestCase):
 
     def test_cell_intersection_includes_cells_with_distant_centers(self):
         mdp = Robot2DMotionMDP()
-        center = mdp.cell_to_state((3, 3))
-        self.assertEqual(set(mdp.localized_uncertainty_states(center, 0.6)), {19, 26, 27, 28, 35})
-        self.assertEqual(mdp.localized_uncertainty_states(center, 0).tolist(), [center])
-        self.assertEqual(len(mdp.localized_uncertainty_states(center, np.inf)), 65)
+        center = (3, 3)
+        self.assertEqual(
+            set(map(tuple, mdp.localized_uncertainty_states(center, 0.6))),
+            {(3, 2), (2, 3), (3, 3), (4, 3), (3, 4)},
+        )
+        np.testing.assert_array_equal(mdp.localized_uncertainty_states(center, 0), [center])
+        with self.assertRaises(ValueError):
+            mdp.localized_uncertainty_states(center, np.inf)
         mdp = Robot2DMotionMDP(x_max=4, y_max=2, grid_shape=(2, 2))
         self.assertEqual(
-            mdp.localized_uncertainty_states(0, 0.6).tolist(), [0, 2, mdp.exit_state],
+            mdp.localized_uncertainty_states((0, 0), 0.6).tolist(), [[0, -1], [0, 0], [0, 1]],
         )
 
     def test_robust_planning_accounts_for_workspace_exit(self):
         mdp = Robot2DMotionMDP(obstacles=[])
-        edge = mdp.cell_to_state((0, 2))
-        self.assertNotIn(mdp.exit_state, mdp.localized_uncertainty_states(edge, 0.5 - 1e-8))
-        self.assertIn(mdp.exit_state, mdp.localized_uncertainty_states(edge, 0.5))
-        self.assertIn(mdp.exit_state, mdp.localized_uncertainty_states(edge, 0.6))
-        upper_edge = mdp.cell_to_state((7, 2))
-        self.assertIn(mdp.exit_state, mdp.localized_uncertainty_states(upper_edge, 0.5))
+        edge = (0, 2)
+        self.assertNotIn((-1, 2), map(tuple, mdp.localized_uncertainty_states(edge, 0.5 - 1e-8)))
+        self.assertIn((-1, 2), map(tuple, mdp.localized_uncertainty_states(edge, 0.5)))
+        self.assertIn((-1, 2), map(tuple, mdp.localized_uncertainty_states(edge, 0.6)))
+        upper_edge = (7, 2)
+        self.assertIn((8, 2), map(tuple, mdp.localized_uncertainty_states(upper_edge, 0.5)))
         agent = Tabular_Agent(mdp, gamma=0.9, lr_init=0.5, R=0.25, C=0.6)
         values = np.full(mdp.n_state, 0.8)
         values[mdp.terminal_mask] = 0
@@ -165,11 +170,54 @@ class RobotMotionModelTests(unittest.TestCase):
         mdp = Robot2DMotionMDP(x_max=16, y_max=8, obstacles=[])
         cases = (((0, 3), 1.0), ((7, 3), 1.0), ((3, 0), 0.5), ((3, 7), 0.5), ((3, 3), 3.5))
         for cell, distance in cases:
-            state = mdp.cell_to_state(cell)
+            state = cell
             for radius in (distance - 1e-8, distance, distance + 1e-8):
                 with self.subTest(cell=cell, radius=radius):
                     states = mdp.localized_uncertainty_states(state, radius)
-                    self.assertEqual(mdp.exit_state in states, radius >= distance)
+                    self.assertEqual(any(mdp.is_outside(s) for s in states), radius >= distance)
+
+    def test_global_neighborhoods_match_independent_cell_distances(self):
+        mdp = Robot2DMotionMDP()
+        cells = np.array([(x, y) for y in range(-6, 15) for x in range(-6, 15)])
+        lower = cells * mdp.cell_widths
+        upper = lower + mdp.cell_widths
+        for nominal in ((-2, -1), (0, 0), (3, 3), mdp.goal_state, (8, 7), (10, 9)):
+            center = mdp.coordinates(nominal)
+            closest = np.clip(center, lower, upper)
+            distances = np.linalg.norm(closest - center, axis=1)
+            for C in (0, 0.5, 0.6, 1.1, 2.2):
+                expected = set(map(tuple, cells[distances <= C + 1e-12]))
+                actual = set(map(tuple, mdp.localized_uncertainty_states(nominal, C)))
+                self.assertEqual(actual, expected)
+
+    def test_terminal_successors_use_full_neighborhood_and_zero_terminal_values(self):
+        mdp = Robot2DMotionMDP()
+        values = np.ones(mdp.n_state)
+        for terminal, neighbor in ((mdp.goal_state, (6, 7)), ((2, 1), (3, 1)), ((8, 2), (7, 2))):
+            for action in range(4):
+                self.assertEqual(mdp.nominal_next_state(terminal, action), terminal)
+                self.assertEqual(mdp.reward(terminal, action), 0)
+            self.assertEqual(mdp.values_at(terminal, values), 0)
+            candidates = set(map(tuple, mdp.localized_uncertainty_states(terminal, 0.6)))
+            self.assertIn(terminal, candidates)
+            self.assertIn(neighbor, candidates)
+        values[mdp.state_index((7, 2))] = -0.2
+        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
+        self.assertAlmostEqual(agent.robust_td_target(0.1, (8, 2), values), 0.055)
+        self.assertEqual(agent.robust_td_target(0.1, (8, 2), values, C=0), 0.1)
+        self.assertEqual(mdp.worst_case_value((8, 2), np.inf, values), -0.2)
+
+    def test_nominal_exit_ends_training_without_an_outside_Q_row(self):
+        mdp = Robot2DMotionMDP()
+        row = mdp.state_index(mdp.start_state)
+        mdp.nominal_transitions[row, 1] = (-1, 0)
+        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.2, C=0.6)
+        with patch.object(agent, "epsilon_greedy_policy", return_value=1):
+            agent.robust_q_learning(1, exploring_starts=False)
+        self.assertEqual(mdp.s, (-1, 0))
+        self.assertEqual(agent.visit_counts[row, 1], 1)
+        self.assertEqual(agent.training_diagnostics["transitions"], 1)
+        self.assertEqual(agent.Q.shape, (64, 4))
 
     def test_goal_ends_the_episode_before_followup_transitions(self):
         mdp = Robot2DMotionMDP(
@@ -249,7 +297,8 @@ class SingleRunnerTests(unittest.TestCase):
                             self.assertIs(agent.env, saved["mdp"])
                             self.assertEqual(agent.R, R)
                             self.assertEqual(agent.C, C)
-                            start_value = np.max(agent.Q[saved["mdp"].start_state])
+                            start_row = saved["mdp"].state_index(saved["mdp"].start_state)
+                            start_value = np.max(agent.Q[start_row])
                             self.assertEqual(start_value, curve[-1])
                             self.assertEqual(len(curve), agent.visit_counts.sum() + 1)
                         with redirect_stdout(io.StringIO()):
@@ -314,7 +363,7 @@ class ValuePolicyPlotTests(unittest.TestCase):
         mdp = Robot2DMotionMDP(x_max=4, y_max=2, grid_shape=(2, 2))
         agent = Tabular_Agent(mdp, gamma=0.95, lr_init=0.5, R=0.2, C=0.6)
         agent.Q = np.array(((0.1, 0.4, 0.2, 0.3), (0.7, 0.3, 0.2, 0.1),
-                            (0.2, 0.3, 0.9, 0.4), (0, 0, 0, 0), (0, 0, 0, 0)))
+                            (0.2, 0.3, 0.9, 0.4), (0, 0, 0, 0)))
         fig = plot_robot_2d_tabular(mdp, agent, show=False)
         try:
             values_axis, policy_axis = fig.axes[:2]
@@ -360,8 +409,8 @@ class OnlineRunnerTests(unittest.TestCase):
                     self.assertEqual(results["final_delta"], controller.acp.delta_k)
                     self.assertNotIn("evaluation", results)
                     self.assertFalse(hasattr(controller, "results"))
-                    self.assertEqual(results["Q"].shape, (65, 4))
-                    self.assertEqual(results["policy"].shape, (65,))
+                    self.assertEqual(results["Q"].shape, (64, 4))
+                    self.assertEqual(results["policy"].shape, (64,))
                     np.testing.assert_array_equal(results["Q"], controller.Q)
                     np.testing.assert_array_equal(results["policy"], controller.policy)
                     np.testing.assert_array_equal(results["visit_counts"],
