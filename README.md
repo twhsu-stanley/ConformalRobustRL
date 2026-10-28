@@ -272,7 +272,7 @@ python -m robot_2d.train_robot_2d_transformer
 
 `generate_robot_2d_q_data.py` supplies the MDP, random map generation, R/C values,
 and discount. Its defaults match the online example's geometry, rewards, and
-discount, with 200 maps containing 10-30 obstacles. Each map first samples random
+discount, with 3,000 maps containing 20-30 obstacles. Each map first samples random
 start and goal cells with physical cell-center distance at least
 `start_goal_seperation=7.5`. Obstacles then retain the two-cell clearance from both
 endpoints and a nominal start-to-goal path. The seed controls endpoint and obstacle

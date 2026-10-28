@@ -22,7 +22,8 @@ class TransformerIntegrationTests(unittest.TestCase):
         rows = description.split("\n\n", 1)[1].splitlines()[:mdp.ny]
         grid = np.array([[int(cell) for cell in row.split()] for row in rows])
         np.testing.assert_array_equal(grid, mdp.obstacle_mask)
-        self.assertIn(f"Start at {mdp.start_state} and move to {mdp.goal_state}", description)
+        self.assertIn(f"Start at {mdp.start_state}", description)
+        self.assertIn(f"goal state at {mdp.goal_state}", description)
         mdp.noise_probability, mdp.noise_radius = 0.9, 10.0
         self.assertEqual(mdp.q_transformer_context(), description)
         mdp.start_state = (1, 0)
@@ -53,7 +54,8 @@ class TransformerIntegrationTests(unittest.TestCase):
             self.assertFalse(mdp.is_terminal(mdp.start_state))
             self.assertTrue(mdp.is_terminal(mdp.goal_state))
             description = mdp.q_transformer_context()
-            self.assertIn(f"Start at {mdp.start_state} and move to {mdp.goal_state}", description)
+            self.assertIn(f"Start at {mdp.start_state}", description)
+            self.assertIn(f"goal state at {mdp.goal_state}", description)
             for iy, ix in np.argwhere(mdp.obstacle_mask):
                 for sx, sy in (mdp.start_state, mdp.goal_state):
                     self.assertGreaterEqual(max(abs(ix - sx), abs(iy - sy)), 2)
@@ -70,7 +72,7 @@ class TransformerIntegrationTests(unittest.TestCase):
         self.assertTrue(prompt.startswith("### Instruction:\n"))
         self.assertIn("size 3x2", prompt)
         self.assertIn("0 = free space, 1 = obstacle.\n\n0 1 0\n0 0 0", prompt)
-        self.assertIn("Start at (0, 0) and move to (2, 1)", prompt)
+        self.assertIn("Start at (0, 0) and move to the goal state at (2, 1)", prompt)
         self.assertIn("Predict the Q-table for R = 0.3 and C = infinity.", prompt)
 
     def test_random_endpoints_use_physical_distance_and_repeat_with_the_seed(self):

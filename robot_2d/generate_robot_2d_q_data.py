@@ -53,7 +53,7 @@ def training_maps(mdp, n_maps, *, n_obstacles=(10, 30), start_goal_seperation=7.
 
 
 def main(
-    mdp, *, gamma=0.9, n_maps=200, n_obstacles=(20, 30), start_goal_seperation=7.5, seed=7,
+    mdp, *, gamma=0.9, n_maps=3000, n_obstacles=(20, 30), start_goal_seperation=7.5, seed=7,
     R_values=(0.0, 0.1, 0.2, 0.3),
     C_values=(0.0, 1.0, 1.75, np.inf),
 ):
@@ -73,5 +73,5 @@ if __name__ == "__main__":
         x_max=10, y_max=10, grid_shape=(10, 10), obstacles=[],
         movement_reward=0.0, goal_reward=1.0,
     )
-    main(mdp, gamma=0.9, n_maps=200, n_obstacles=(20, 30), start_goal_seperation=7.5, 
-        R_values=(0.0, 0.2, 0.4), C_values=(0.0, 1.0, 1.75, np.inf), seed=7)
+    main(mdp, gamma=0.9, n_maps=2500, n_obstacles=(20, 30), start_goal_seperation=7.5,
+        R_values=(0.0, 0.2, 0.4, 0.5), C_values=(0.0, 1.0, 1.75, 3.0, np.inf), seed=7)
