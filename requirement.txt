@@ -6,3 +6,4 @@ matplotlib>=3.7
 # Transformer training and warm-start inference
 torch>=2.6,<2.7
 transformers>=4.46,<5
+accelerate>=0.26,<2

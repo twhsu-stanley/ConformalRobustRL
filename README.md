@@ -257,11 +257,17 @@ Zero initialization remains the default in both entry points. Transformer code i
 shared across examples in `q_transformer/`; it contains no robot or 2-D imports:
 
 - `data.py` generates numeric Q-table labels using robust value iteration and
-  splits records by map, keeping all R/C variants of a map in one partition.
+  randomly splits individual samples with seed 42, matching the original code.
 - `model.py` implements the supplied encoder/mean-pooling/regression architecture
   and frozen checkpoint inference. R and C condition the input; only Q is predicted.
-- `train.py` fine-tunes the encoder and Q head with Huber loss, evaluates on unseen
-  maps each epoch, and retains one checkpoint with the lowest validation loss.
+- `train.py` fine-tunes the encoder and Q head with Huber loss using the original
+  settings: 100 epochs, batch size 4, learning rate 1e-5, and weight decay 0.01.
+  Hugging Face Trainer uses AdamW, linear learning-rate decay, no warmup, and
+  gradient clipping at 1.0. CUDA training uses FP16. Head weights start uniformly
+  in [-1, 1]. It logs every 50 steps and saves each epoch and the final model.
+  It uses 90% of samples for training and 10% for validation; different R/C variants
+  of the same map can occur in both. As in the original, automatic validation and
+  selection by validation loss are disabled; the online experiment uses the final model.
 
 Generate the dataset once, then train from the saved file:
 
@@ -289,7 +295,8 @@ Data and weights go to `robot_2d/saved_results/q_transformer/`:
 
 ```text
 q_data.npz              # Numeric Q labels, R/C, unique map descriptions, and residuals
-checkpoint/            # One best model.pt plus its encoder config and tokenizer
+checkpoint/            # Final model.pt plus its encoder config and tokenizer
+checkpoint/checkpoint-*/ # Per-epoch models, optimizer/scheduler state, and Trainer state
 ```
 
 `Tabular_Agent.value_iteration()` uses the same robust target and MDP uncertainty
@@ -341,9 +348,10 @@ indices. Grid rows increase in y and columns increase in x. The shared formatter
 adds `### Instruction:`, supplies numeric R/C (including `infinity`), and requests
 the Q-table. Targets remain numeric Q-tables. The unknown deployment disturbance
 law is not an input.
-Training and inference use the same formatter and tokenizer. Inputs exceeding the
-encoder context are rejected rather than truncated; larger 3-D grids may need a
-longer-context encoder or a compact map description.
+Training and inference use the same formatter and tokenizer, with fixed-length
+padding and truncation at 512 tokens, matching the original training settings.
+The input length is capped by the encoder context; larger 3-D grids may need a
+longer-context encoder or a compact map description to retain the full prompt.
 
 ## Validation
 
@@ -356,5 +364,5 @@ Tests cover global discretization, distinct outside cells, cell-distance
 neighborhoods, terminal values and initialization, nominal/reference learning,
 terminal-inclusive calibration, mismatch accounting, controller continuation,
 saved results, and plotting. Shared transformer checks cover 3-D state/action
-shapes, map-disjoint splits, checkpoint reload, and actual warm-start Q-learning
+shapes, sample splits, epoch/final checkpoint reload, and actual warm-start Q-learning
 using a tiny local encoder. Model checks skip when optional dependencies are absent.

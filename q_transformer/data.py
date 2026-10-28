@@ -69,15 +69,12 @@ def generate_q_data(
     return output_path
 
 
-def split_by_map(map_indices, validation_fraction=0.2, seed=7):
-    """Keep every (R,C) variant of a map entirely in one partition."""
+def split_samples(n_samples, validation_fraction=0.1, seed=42):
+    """Match the original dataset's seeded random split of individual samples."""
     if not 0 < validation_fraction < 1:
         raise ValueError("validation_fraction must be in (0, 1).")
-    map_indices = np.asarray(map_indices)
-    maps = np.unique(map_indices)
-    if len(maps) < 2:
-        raise ValueError("Training and validation require at least two distinct maps.")
-    maps = np.random.default_rng(seed).permutation(maps)
-    count = max(1, min(len(maps) - 1, int(np.ceil(len(maps) * validation_fraction))))
-    validation = np.isin(map_indices, maps[:count])
-    return np.flatnonzero(~validation), np.flatnonzero(validation)
+    if not isinstance(n_samples, (int, np.integer)) or n_samples < 2:
+        raise ValueError("Training and validation require at least two samples.")
+    indices = np.random.default_rng(seed).permutation(n_samples)
+    count = max(1, min(n_samples - 1, int(np.ceil(n_samples * validation_fraction))))
+    return indices[count:], indices[:count]

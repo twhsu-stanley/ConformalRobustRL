@@ -8,8 +8,8 @@ if not __package__:
 
 
 def main(
-    *, epochs=30, batch_size=8, learning_rate=2e-5, seed=7,
-    model_name="google-bert/bert-base-uncased",
+    *, epochs=100, batch_size=4, learning_rate=1e-5, seed=42,
+    model_name="bert-base-uncased",
 ):
     output_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
     dataset_path = output_dir / "q_data.npz"

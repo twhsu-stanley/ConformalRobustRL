@@ -11,13 +11,10 @@ from q_transformer.data import format_prompt
 
 
 def tokenize_prompts(tokenizer, prompts, max_length):
-    """Never silently remove map cells or the R/C conditioning from an input."""
-    encoded = tokenizer(prompts, padding=True, truncation=False, return_tensors="pt")
-    if encoded["input_ids"].shape[1] > max_length:
-        raise ValueError(
-            f"The full MDP prompt exceeds {max_length} tokens. Use a shorter description "
-            "or an encoder with a longer context; truncation is not permitted."
-        )
+    """Use the original fixed-length padding and truncation for training and inference."""
+    encoded = tokenizer(
+        prompts, padding="max_length", truncation=True, max_length=max_length, return_tensors="pt",
+    )
     return {key: encoded[key] for key in ("input_ids", "attention_mask")}
 
 
@@ -30,12 +27,16 @@ class QValueTransformer(nn.Module):
         self.n_states = n_states
         self.n_actions = n_actions
         self.reg_head = nn.Linear(encoder.config.hidden_size, n_states * n_actions)
+        nn.init.uniform_(self.reg_head.weight, a=-1, b=1)
 
-    def forward(self, input_ids, attention_mask):
+    def forward(self, input_ids, attention_mask, labels=None):
         hidden = self.encoder(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state
         mask = attention_mask.unsqueeze(-1).to(hidden.dtype)
         pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1)
-        return self.reg_head(pooled).reshape(-1, self.n_states, self.n_actions)
+        Q = self.reg_head(pooled).reshape(-1, self.n_states, self.n_actions)
+        if labels is None:
+            return Q
+        return {"loss": nn.functional.smooth_l1_loss(Q, labels), "logits": Q}
 
     def save_checkpoint(self, path, tokenizer, max_length, training):
         """Store weights once, with the tokenizer, encoder config, and Q-table shape."""

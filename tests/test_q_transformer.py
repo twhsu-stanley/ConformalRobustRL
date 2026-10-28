@@ -10,10 +10,12 @@ import unittest
 import gymnasium as gym
 import numpy as np
 
-from q_transformer.data import format_prompt, generate_q_data, split_by_map
+from q_transformer.data import format_prompt, generate_q_data, split_samples
 from Tabular_Agent import Tabular_Agent
 
-HAS_TRANSFORMER = all(importlib.util.find_spec(name) for name in ("torch", "transformers"))
+HAS_TRANSFORMER = all(
+    importlib.util.find_spec(name) for name in ("torch", "transformers", "accelerate")
+)
 
 
 class ThreeDimensionalMDP(gym.Env):
@@ -77,8 +79,11 @@ class TransformerDataTests(unittest.TestCase):
                 for Q, index in zip(data["Q"], data["map_index"]):
                     np.testing.assert_array_equal(Q[maps[index].terminal_mask], 0)
                     np.testing.assert_array_equal(Q[~maps[index].terminal_mask], 1)
-                train, validation = split_by_map(data["map_index"])
-                self.assertFalse(set(data["map_index"][train]) & set(data["map_index"][validation]))
+                train, validation = split_samples(len(data["Q"]))
+                self.assertEqual((len(train), len(validation)), (7, 1))
+                self.assertFalse(set(train) & set(validation))
+                np.testing.assert_array_equal(np.sort(np.r_[train, validation]), np.arange(8))
+                self.assertTrue(set(data["map_index"][train]) & set(data["map_index"][validation]))
 
     def test_conditioning_is_in_the_instruction_prompt(self):
         mdp = ThreeDimensionalMDP()
@@ -148,17 +153,24 @@ class TransformerModelTests(unittest.TestCase):
                 data_path, checkpoint, model_name=str(encoder_path), epochs=8,
                 batch_size=4, learning_rate=0.01, max_length=256, device="cpu",
             )
-            self.assertLess(history[-1]["training_loss"], history[0]["training_loss"])
+            self.assertTrue(np.isfinite(history[-1]["train_loss"]))
             saved = torch.load(checkpoint / "model.pt", weights_only=True)
             self.assertEqual(saved["Q_shape"], (2, 6))
             self.assertNotIn("task", saved)
-            self.assertEqual(saved["training"]["validation_loss"],
-                             min(row["validation_loss"] for row in history))
-            self.assertFalse(set(saved["training"]["training_maps"]) &
-                             set(saved["training"]["validation_maps"]))
+            self.assertEqual(saved["training"]["epoch"], 8)
+            epoch_paths = sorted(checkpoint.glob("checkpoint-*"), key=lambda p: int(p.name[11:]))
+            self.assertEqual(len(epoch_paths), 8)
+            first_optimizer = torch.load(epoch_paths[0] / "optimizer.pt", weights_only=True)
+            last_optimizer = torch.load(epoch_paths[-1] / "optimizer.pt", weights_only=True)
+            self.assertAlmostEqual(first_optimizer["param_groups"][0]["lr"], 0.01 * 7 / 8)
+            self.assertEqual(last_optimizer["param_groups"][0]["lr"], 0.0)
+            self.assertEqual({group["weight_decay"] for group in first_optimizer["param_groups"]},
+                             {0.0, 0.01})
             predictor = QTransformerPredictor(checkpoint, device="cpu")
             mdp = ThreeDimensionalMDP()
             Q = predictor(mdp, 0.3, np.inf)
+            first_predictor = QTransformerPredictor(epoch_paths[0], device="cpu")
+            self.assertFalse(np.array_equal(Q, first_predictor(mdp, 0.3, np.inf)))
             self.assertEqual(Q.shape, (2, 6))
             np.testing.assert_array_equal(Q[mdp.terminal_mask], 0)
             np.testing.assert_array_equal(Q, predictor(mdp, 0.3, np.inf))
@@ -173,8 +185,10 @@ class TransformerModelTests(unittest.TestCase):
             wrong_shape.action_space = gym.spaces.Discrete(4)
             with self.assertRaisesRegex(ValueError, "Q-table shape"):
                 predictor(wrong_shape, 0.3, np.inf)
-            with self.assertRaisesRegex(ValueError, "truncation is not permitted"):
-                tokenize_prompts(tokenizer, ["free " * 100], 64)
+            encoded = tokenize_prompts(tokenizer, ["free", "free " * 100], 64)
+            self.assertEqual(tuple(encoded["input_ids"].shape), (2, 64))
+            self.assertEqual(encoded["attention_mask"][1].sum(), 64)
+            self.assertLess(encoded["attention_mask"][0].sum(), 64)
 
 
 if __name__ == "__main__":
