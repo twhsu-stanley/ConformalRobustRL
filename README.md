@@ -287,6 +287,8 @@ start and goal cells with physical cell-center distance at least
 `start_goal_seperation=7.5`. Obstacles then retain the two-cell clearance from both
 endpoints and a nominal start-to-goal path. The seed controls endpoint and obstacle
 sampling. Dataset generation does not import transformer libraries.
+A progress bar counts completed Q-table samples across all maps and R/C
+combinations, showing the total, elapsed time, and estimated time remaining.
 
 `train_robot_2d_transformer.py` only loads the existing dataset and trains the model.
 Configure epochs, batch size, learning rate, and model name there. Rerunning this

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import numpy as np
+from tqdm import tqdm
 
 from Tabular_Agent import Tabular_Agent
 
@@ -20,13 +21,15 @@ def format_prompt(description, R, C):
 
 
 def generate_q_data(
-    mdps, R_values, C_values, gamma, output_path, *, tolerance=1e-8, max_iterations=10000,
+    mdps, R_values, C_values, gamma, output_path, *, n_maps=None,
+    tolerance=1e-8, max_iterations=10000,
 ):
     """Save numeric Q targets, storing each distinct map description only once.
 
     mdps is an iterable of nominal MDPs. Environment construction and randomized
     map generation belong to the example, not to this shared learning code.
     Use consistent geometry, action ordering, and rewards throughout a dataset.
+    Supply n_maps for a progress total when mdps is a generator without a length.
     """
     R_values, C_values = tuple(R_values), tuple(C_values)
     if not R_values or not C_values:
@@ -36,26 +39,35 @@ def generate_q_data(
             Tabular_Agent._validate_uncertainty(R, C)
     descriptions, map_indices, radii, levels, targets, residuals = [], [], [], [], [], []
     seen = set()
-    for mdp in mdps:
-        description = mdp.unwrapped.q_transformer_context()
-        if description in seen:
-            continue
-        seen.add(description)
-        map_index = len(descriptions)
-        descriptions.append(description)
-        agent = Tabular_Agent(mdp, gamma=gamma, lr_init=0.5)
-        if targets and agent.Q.shape != targets[0].shape:
-            raise ValueError("All training maps must have the same Q-table shape.")
-        for R in R_values:
-            for C in C_values:
-                Q, _ = agent.value_iteration(
-                    R=R, C=C, tolerance=tolerance, max_iterations=max_iterations,
-                )
-                map_indices.append(map_index)
-                levels.append(R)
-                radii.append(C)
-                targets.append(Q)
-                residuals.append(agent.value_iteration_diagnostics["bellman_residual"])
+    if n_maps is None and hasattr(mdps, "__len__"):
+        n_maps = len(mdps)
+    samples_per_map = len(R_values) * len(C_values)
+    total = None if n_maps is None else n_maps * samples_per_map
+    with tqdm(total=total, desc="Generating Q tables", unit="sample") as progress:
+        for mdp in mdps:
+            description = mdp.unwrapped.q_transformer_context()
+            if description in seen:
+                if progress.total is not None:
+                    progress.total -= samples_per_map
+                    progress.refresh()
+                continue
+            seen.add(description)
+            map_index = len(descriptions)
+            descriptions.append(description)
+            agent = Tabular_Agent(mdp, gamma=gamma, lr_init=0.5)
+            if targets and agent.Q.shape != targets[0].shape:
+                raise ValueError("All training maps must have the same Q-table shape.")
+            for R in R_values:
+                for C in C_values:
+                    Q, _ = agent.value_iteration(
+                        R=R, C=C, tolerance=tolerance, max_iterations=max_iterations,
+                    )
+                    map_indices.append(map_index)
+                    levels.append(R)
+                    radii.append(C)
+                    targets.append(Q)
+                    residuals.append(agent.value_iteration_diagnostics["bellman_residual"])
+                    progress.update(1)
     if not targets:
         raise ValueError("Provide at least one MDP.")
     output_path = Path(output_path)

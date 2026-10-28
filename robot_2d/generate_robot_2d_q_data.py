@@ -62,7 +62,7 @@ def main(
         mdp, n_maps, n_obstacles=n_obstacles, start_goal_seperation=start_goal_seperation,
         seed=seed,
     )
-    generate_q_data(maps, R_values, C_values, gamma, dataset_path)
+    generate_q_data(maps, R_values, C_values, gamma, dataset_path, n_maps=n_maps)
     print(f"Saved Q-table dataset to {dataset_path}")
     return dataset_path
 

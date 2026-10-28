@@ -2,6 +2,7 @@
 numpy>=1.24
 gymnasium>=0.29
 matplotlib>=3.7
+tqdm>=4.66
 
 # Transformer training and warm-start inference
 torch>=2.6,<2.7
