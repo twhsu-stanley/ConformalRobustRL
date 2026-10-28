@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import gymnasium as gym
 import numpy as np
@@ -149,10 +150,11 @@ class TransformerModelTests(unittest.TestCase):
                 0.9, data_path,
             )
             checkpoint = directory / "checkpoint"
-            history = train_q_transformer(
-                data_path, checkpoint, model_name=str(encoder_path), epochs=8,
-                batch_size=4, learning_rate=0.01, max_length=256, device="cpu",
-            )
+            with patch("q_transformer.train.torch.cuda.is_available", return_value=False):
+                history = train_q_transformer(
+                    data_path, checkpoint, model_name=str(encoder_path), epochs=8,
+                    batch_size=4, learning_rate=0.01, max_length=256, device="cuda",
+                )
             self.assertTrue(np.isfinite(history[-1]["train_loss"]))
             saved = torch.load(checkpoint / "model.pt", weights_only=True)
             self.assertEqual(saved["Q_shape"], (2, 6))

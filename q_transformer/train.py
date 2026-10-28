@@ -31,6 +31,7 @@ def train_q_transformer(
 
     model_name can also be a local pretrained encoder directory. R and C are
     supplied only in the input; the regression target is the Q-table alone.
+    CUDA training uses FP16; unavailable CUDA falls back to CPU with FP32.
     """
     for name, value in (("epochs", epochs), ("batch_size", batch_size), ("max_length", max_length)):
         if not isinstance(value, (int, np.integer)) or value < 1:
@@ -64,14 +65,16 @@ def train_q_transformer(
          "labels": torch.from_numpy(targets[i])}
         for i in range(len(prompts))
     ]
-    use_cpu = device is not None and torch.device(device).type == "cpu"
-    if device is not None and torch.device(device).type == "cuda":
+    use_cpu = not torch.cuda.is_available() or (
+        device is not None and torch.device(device).type == "cpu"
+    )
+    if not use_cpu and device is not None and torch.device(device).type == "cuda":
         torch.cuda.set_device(device)
     arguments = TrainingArguments(
         output_dir=str(checkpoint_path), save_strategy="epoch", num_train_epochs=epochs,
         per_device_train_batch_size=batch_size, per_device_eval_batch_size=batch_size,
         logging_steps=50, learning_rate=learning_rate, weight_decay=0.01,
-        fp16=torch.cuda.is_available() and not use_cpu, use_cpu=use_cpu, seed=seed,
+        fp16=not use_cpu, use_cpu=use_cpu, seed=seed,
         optim="adamw_torch", lr_scheduler_type="linear", report_to="none",
     )
     trainer = _QTrainer(
@@ -79,6 +82,7 @@ def train_q_transformer(
         train_dataset=[dataset[i] for i in train_indices],
         eval_dataset=[dataset[i] for i in validation_indices], processing_class=tokenizer,
     )
+    print(f"Training on {trainer.args.device} ({'FP16' if arguments.fp16 else 'FP32'}).")
     trainer.train()
     trainer.save_model(str(checkpoint_path))
     return trainer.state.log_history

@@ -269,6 +269,10 @@ shared across examples in `q_transformer/`; it contains no robot or 2-D imports:
   of the same map can occur in both. As in the original, automatic validation and
   selection by validation loss are disabled; the online experiment uses the final model.
 
+Training automatically selects an NVIDIA CUDA GPU when available and falls back
+to CPU with FP32 otherwise. The startup message shows the selected device and
+precision. GPU training requires a CUDA-enabled PyTorch installation.
+
 Generate the dataset once, then train from the saved file:
 
 ```powershell
