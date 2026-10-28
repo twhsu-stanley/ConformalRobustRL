@@ -73,5 +73,5 @@ if __name__ == "__main__":
         x_max=10, y_max=10, grid_shape=(10, 10), obstacles=[],
         movement_reward=0.0, goal_reward=1.0,
     )
-    main(mdp, gamma=0.9, n_maps=10, n_obstacles=(20, 30), start_goal_seperation=7.5, 
-        R_values=(0.0, 0.1), C_values=(0.0, 1.0))
+    main(mdp, gamma=0.9, n_maps=200, n_obstacles=(20, 30), start_goal_seperation=7.5, 
+        R_values=(0.0, 0.2, 0.4), C_values=(0.0, 1.0, 1.75, np.inf), seed=7)
