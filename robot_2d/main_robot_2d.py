@@ -68,8 +68,10 @@ def main(
 
 
 if __name__ == "__main__":
-    # This example needs a checkpoint trained with its own reward settings and discount.
-    checkpoint_path = None
+    # Set to None to use zero initialization instead of the trained transformer.
+    checkpoint_path = (
+        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint-365625"
+    )
     q_initializer = None
     if checkpoint_path is not None:
         from q_transformer.model import QTransformerPredictor
@@ -78,11 +80,11 @@ if __name__ == "__main__":
     # Fix C = 1.0, compare different R values
     main(R=0.0, C=1.0, q_initializer=q_initializer)
 
-    #main(R=0.1, C=1.0, q_initializer=q_initializer)
+    main(R=0.1, C=1.0, q_initializer=q_initializer)
 
-    #main(R=0.2, C=1.0, q_initializer=q_initializer)
+    main(R=0.2, C=1.0, q_initializer=q_initializer)
 
     # Fix R = 0.2, compare different C values
-    #main(R=0.2, C=0.0, q_initializer=q_initializer)
+    main(R=0.2, C=0.0, q_initializer=q_initializer)
     # R=0.2, C=1.0 was already trained above.
-    #main(R=0.2, C=2.0, q_initializer=q_initializer)
+    main(R=0.2, C=2.0, q_initializer=q_initializer)
