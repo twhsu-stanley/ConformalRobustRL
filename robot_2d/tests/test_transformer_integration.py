@@ -104,7 +104,7 @@ class TransformerIntegrationTests(unittest.TestCase):
                 controller = run_online(
                     Robot2DMotionMDP(), n_deployment_episodes=2, training_episodes=3,
                     method="nominal", horizon=2, save_plots=False, verbose=False,
-                    q_initializer=initializer,
+                    q_initializer=initializer, training_tolerance=0.5,
                 )
             self.assertEqual(calls, [(0.0, 0.0)])
             self.assertFalse(controller.history[0]["training"]["zero_initialized"])
@@ -115,7 +115,7 @@ class TransformerIntegrationTests(unittest.TestCase):
             calls.clear()
             train_fixed(
                 training_episodes=2, n_trials=1, horizon=2, output_dir=directory,
-                q_initializer=initializer,
+                q_initializer=initializer, training_tolerance=0.5,
             )
             self.assertEqual(calls, [(0.15, 1.2)])
             path = next(directory.glob("*_agents.pkl"))

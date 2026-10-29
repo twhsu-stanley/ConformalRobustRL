@@ -107,6 +107,7 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from conformally_robust_controller import ConformallyRobustController
 controller = ConformallyRobustController(
     Robot2DMotionMDP(), R=0, C=0, training_episodes=2, horizon=2,
+    training_tolerance=1.0,
 )
 assert controller.run_episode()['training']['zero_initialized']
 """
@@ -180,7 +181,7 @@ class TransformerModelTests(unittest.TestCase):
                 not parameter.requires_grad for parameter in predictor.model.parameters()
             ))
             agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.3, C=np.inf)
-            agent.robust_q_learning(2, initial_Q=Q)
+            agent.robust_q_learning(2000, initial_Q=Q)
             self.assertEqual(agent.evaluation_return[0], Q[0].max())
             self.assertFalse(agent.training_diagnostics["zero_initialized"])
             wrong_shape = ThreeDimensionalMDP()

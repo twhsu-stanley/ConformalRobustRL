@@ -25,10 +25,12 @@ class ConformallyRobustController:
     Indices are zero-based online and negative for the initial pilot episodes.
     q_initializer(mdp, R_used, C_used) optionally returns the initial Q-table;
     the predictor remains outside the agent and saved experiment results.
+    training_episodes caps Algorithm 1; training_tolerance controls convergence.
     """
 
     def __init__(
-        self, mdp, *, gamma=0.95, horizon=100, training_episodes=2000,
+        self, mdp, *, gamma=0.95, horizon=100, training_episodes=20000,
+        training_tolerance=1e-6, training_check_every=100,
         training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
         eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100,
         pilot_episodes=20,
@@ -40,6 +42,7 @@ class ConformallyRobustController:
         for name, value in (
             ("horizon", horizon), ("training_episodes", training_episodes),
             ("training_horizon", training_horizon), ("pilot_episodes", pilot_episodes),
+            ("training_check_every", training_check_every),
         ):
             if name == "pilot_episodes" and C is not None:
                 continue
@@ -48,9 +51,13 @@ class ConformallyRobustController:
                 raise ValueError(f"{name} must be an integer of at least {minimum}.")
         if not np.isfinite(gamma) or not 0 <= gamma < 1:
             raise ValueError("gamma must be in [0, 1).")
+        if not np.isfinite(training_tolerance) or training_tolerance <= 0:
+            raise ValueError("training_tolerance must be positive and finite.")
         self.gamma = float(gamma)
         self.horizon = int(horizon)
         self.training_episodes = int(training_episodes)
+        self.training_tolerance = float(training_tolerance)
+        self.training_check_every = int(training_check_every)
         self.pilot_episodes = int(pilot_episodes) if C is None else 0
         self.fixed_R = None if R is None else float(R)
         self.fixed_C = None if C is None else float(C)
@@ -118,7 +125,10 @@ class ConformallyRobustController:
         R_used = self.R_hat if self.fixed_R is None else self.fixed_R
         C_used = self.acp.quantile() if self.fixed_C is None else self.fixed_C
         Tabular_Agent._validate_uncertainty(R_used, C_used)
-        reused = self.fixed_R is not None and self.fixed_C is not None and self.agent is not None
+        reused = (
+            self.fixed_R is not None and self.fixed_C is not None and self.agent is not None
+            and self.agent.training_diagnostics.get("converged", False)
+        )
         if not reused:
             self.agent = Tabular_Agent(
                 self.training_env, R=R_used, C=C_used, seed=self._next_seed(),
@@ -130,6 +140,7 @@ class ConformallyRobustController:
             self.Q, self.policy = self.agent.robust_q_learning(
                 self.training_episodes, exploring_starts=True, record_every=100,
                 initial_Q=initial_Q,
+                tolerance=self.training_tolerance, check_every=self.training_check_every,
             )
         record = self.deployment_env.deploy_policy(self.policy, self.gamma)
         record.update({

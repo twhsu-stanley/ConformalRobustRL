@@ -14,9 +14,11 @@ from Tabular_Agent import Tabular_Agent
 
 
 def main(
-    *, R=0.15, C=1.2, gamma=0.95, training_episodes=5000, n_trials=15,
+    *, R=0.15, C=1.2, gamma=0.95, training_episodes=20000, n_trials=15,
     horizon=100, seed=7, output_dir=None, q_initializer=None,
+    training_tolerance=1e-6, training_check_every=100,
 ):
+    """Train to the Bellman tolerance, using training_episodes as a safety cap."""
     if not isinstance(n_trials, (int, np.integer)) or n_trials < 1:
         raise ValueError("n_trials must be a positive integer.")
     if output_dir is None:
@@ -39,12 +41,16 @@ def main(
             R=R, C=C, seed=None if seed is None else seed + trial,
         )
         initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
-        agent.robust_q_learning(training_episodes, record_every=1, initial_Q=initial_Q)
+        agent.robust_q_learning(
+            training_episodes, record_every=1, initial_Q=initial_Q,
+            tolerance=training_tolerance, check_every=training_check_every,
+        )
         evaluation_return.append(agent.evaluation_return.copy())
         agents.append(agent)
         print(
             f"Trial {trial + 1}: R={R}, C={C}, "
             f"V(start)={evaluation_return[-1][-1]:.4f}, "
+            f"training episodes={agent.training_diagnostics['episodes']}, "
             f"Bellman residual={agent.training_diagnostics['bellman_residual']:.3g}",
         )
 
@@ -72,11 +78,11 @@ if __name__ == "__main__":
     # Fix C = 1.0, compare different R values
     main(R=0.0, C=1.0, q_initializer=q_initializer)
 
-    main(R=0.1, C=1.0, q_initializer=q_initializer)
+    #main(R=0.1, C=1.0, q_initializer=q_initializer)
 
-    main(R=0.2, C=1.0, q_initializer=q_initializer)
+    #main(R=0.2, C=1.0, q_initializer=q_initializer)
 
     # Fix R = 0.2, compare different C values
-    main(R=0.2, C=0.0, q_initializer=q_initializer)
+    #main(R=0.2, C=0.0, q_initializer=q_initializer)
     # R=0.2, C=1.0 was already trained above.
-    main(R=0.2, C=2.0, q_initializer=q_initializer)
+    #main(R=0.2, C=2.0, q_initializer=q_initializer)

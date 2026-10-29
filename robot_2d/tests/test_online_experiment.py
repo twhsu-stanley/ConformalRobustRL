@@ -1,6 +1,7 @@
 """Check continuous deployment, uncertainty updates, and online controller settings."""
 
 from pathlib import Path
+from functools import partial
 import pickle
 import tempfile
 import unittest
@@ -9,10 +10,14 @@ from unittest.mock import patch
 import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
-from robot_2d.main_robot_2d_online import main
+from robot_2d.main_robot_2d_online import main as run_online
 from robot_2d.utils import randomize_obstacles
 from robot_2d.plot_online_comparison import mismatch_probabilities
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+
+
+# These tests cover deployment bookkeeping; strict convergence is tested in test_tabular_agent.
+main = partial(run_online, training_tolerance=1.0)
 
 
 class ContinuousDeploymentTests(unittest.TestCase):
@@ -415,7 +420,7 @@ class OnlineSettingsTests(unittest.TestCase):
             noise_sampler=lambda position, rng: np.array([10.0, 0.0]),
         )
         controller = ConformallyRobustController(
-            mdp, horizon=5, training_episodes=100, calibration_scores=[0.1] * 20,
+            mdp, horizon=5, training_episodes=2000, calibration_scores=[0.1] * 20,
             R_hat_init=0, seed=7,
         )
         record = controller.run_episode()

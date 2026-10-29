@@ -1,6 +1,7 @@
 """Behavioral checks for the 2-D robot MDP and robot experiment runners."""
 
 from contextlib import ExitStack, redirect_stdout
+from functools import partial
 import io
 import os
 import pickle
@@ -18,12 +19,24 @@ import numpy as np
 from gymnasium.utils.env_checker import check_env
 
 from robot_2d.main_robot_2d import main as single_main
-from robot_2d.main_robot_2d_online import main as online_main
+from robot_2d.main_robot_2d_online import main as run_online
 from robot_2d.plot_fixedRC_eval_returns import main as plot_saved_returns
 from robot_2d.plot_fixedRC_value_policy import main as plot_saved_policy
 from robot_2d.utils import plot_robot_2d_tabular
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
+
+
+# Deployment/storage tests use a loose certificate; solver accuracy is tested separately.
+online_main = partial(run_online, training_tolerance=1.0)
+
+
+def small_runner_mdp(**settings):
+    """Keep runner serialization tests fast while using real convergent Q-learning."""
+    return Robot2DMotionMDP(
+        x_max=2, y_max=2, grid_shape=(2, 2),
+        movement_reward=settings["movement_reward"], goal_reward=settings["goal_reward"],
+    )
 
 
 class ScriptImportTests(unittest.TestCase):
@@ -213,7 +226,8 @@ class RobotMotionModelTests(unittest.TestCase):
         mdp.nominal_transitions[row, 1] = (-1, 0)
         agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.2, C=0.6)
         with patch.object(agent, "epsilon_greedy_policy", return_value=1):
-            agent.robust_q_learning(1, exploring_starts=False)
+            with self.assertRaisesRegex(RuntimeError, "did not converge"):
+                agent.robust_q_learning(1, exploring_starts=False)
         self.assertEqual(mdp.s, (-1, 0))
         self.assertEqual(agent.visit_counts[row, 1], 1)
         self.assertEqual(agent.training_diagnostics["transitions"], 1)
@@ -267,7 +281,10 @@ class RobotMotionModelTests(unittest.TestCase):
 
 class SingleRunnerTests(unittest.TestCase):
     def test_runner_saves_curves_and_reloadable_MDP_agents_for_every_trial(self):
-        with tempfile.TemporaryDirectory(prefix="robot_motion_single_") as directory:
+        with (
+            tempfile.TemporaryDirectory(prefix="robot_motion_single_") as directory,
+            patch("robot_2d.main_robot_2d.Robot2DMotionMDP", side_effect=small_runner_mdp),
+        ):
             root = Path(directory)
             saved_dir = root / "saved_results"
             previous_directory = Path.cwd()
@@ -278,7 +295,7 @@ class SingleRunnerTests(unittest.TestCase):
                     with self.subTest(R=R, C=C, n_trials=n_trials):
                         with redirect_stdout(io.StringIO()) as output:
                             curves = single_main(
-                                R=R, C=C, training_episodes=20, n_trials=n_trials, horizon=5,
+                                R=R, C=C, training_episodes=2000, n_trials=n_trials, horizon=5,
                                 output_dir=saved_dir,
                             )
                         filename = saved_dir / f"robot_2d_R{R}_C{C}.pkl"
@@ -328,6 +345,9 @@ class ResultsDirectoryTests(unittest.TestCase):
             try:
                 os.chdir(working_directory)
                 with ExitStack() as stack:
+                    stack.enter_context(patch(
+                        "robot_2d.main_robot_2d.Robot2DMotionMDP", side_effect=small_runner_mdp,
+                    ))
                     for name in (
                         "main_robot_2d", "main_robot_2d_online", "plot_fixedRC_eval_returns",
                         "plot_fixedRC_value_policy",
@@ -336,7 +356,7 @@ class ResultsDirectoryTests(unittest.TestCase):
                         stack.enter_context(patch(f"robot_2d.{name}.__file__", filename))
                     with redirect_stdout(io.StringIO()):
                         for R, C in ((0.0, 1.0), (0.1, 1.0), (0.2, 1.0), (0.2, 0.0), (0.2, 2.0)):
-                            single_main(R=R, C=C, training_episodes=10, horizon=5)
+                            single_main(R=R, C=C, training_episodes=2000, n_trials=1, horizon=5)
                         figures = plot_saved_returns(show=False)
                         figures.append(plot_saved_policy())
                         for figure in figures:

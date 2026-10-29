@@ -8,6 +8,7 @@ import numpy as np
 
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
+from utils_tabular import calc_evaluation_return_mean_std
 
 
 def reference_q(mdp, gamma, R, C):
@@ -46,7 +47,7 @@ class RobustQLearningTests(unittest.TestCase):
         mdp = self.small_mdp()
         agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.2, C=0.6, seed=2)
         agent.Q.fill(99)
-        Q, policy = agent.robust_q_learning(2000, record_every=100)
+        Q, policy = agent.robust_q_learning(2000, record_every=100, tolerance=1e-8)
         oracle = reference_q(mdp, 0.9, 0.2, 0.6)
         np.testing.assert_allclose(Q, oracle, atol=1e-6)
         self.assertAlmostEqual(np.max(Q[0]), 0.72, places=6)
@@ -75,7 +76,8 @@ class RobustQLearningTests(unittest.TestCase):
         mdp = Robot2DMotionMDP(max_episode_steps=2)
         n_pairs = len(mdp.trainable_states) * 4
         agent = Tabular_Agent(mdp, 0.95, 0.5, seed=9)
-        agent.robust_q_learning(n_pairs, record_every=100)
+        with self.assertRaisesRegex(RuntimeError, "did not converge"):
+            agent.robust_q_learning(n_pairs, record_every=100)
         self.assertTrue(np.all(agent.visit_counts[~mdp.terminal_mask] >= 1))
 
     def test_agent_uses_the_MDP_uncertainty_set(self):
@@ -98,7 +100,8 @@ class RobustQLearningTests(unittest.TestCase):
             x_max=2, y_max=2, grid_shape=(2, 2), max_episode_steps=1, movement_reward=0,
         )
         agent = WarmStartAgent(mdp, 0.9, 0.5, epsilon_init=0, epsilon_lb=0, seed=1)
-        agent.robust_q_learning(1, exploring_starts=False)
+        with self.assertRaisesRegex(RuntimeError, "did not converge"):
+            agent.robust_q_learning(1, exploring_starts=False)
         np.testing.assert_array_equal(agent.Q[mdp.terminal_mask], 0)
         np.testing.assert_array_equal(agent.visit_counts[mdp.terminal_mask], 0)
         np.testing.assert_allclose(agent.Q[agent.visit_counts > 0], 1.9)
@@ -120,7 +123,8 @@ class RobustQLearningTests(unittest.TestCase):
         )
         initial_Q = np.full((mdp.n_state, 4), 2.0)
         agent = Tabular_Agent(mdp, 0.9, 0.5, epsilon_init=0, epsilon_lb=0, seed=1)
-        agent.robust_q_learning(1, initial_Q=initial_Q, exploring_starts=False)
+        with self.assertRaisesRegex(RuntimeError, "did not converge"):
+            agent.robust_q_learning(1, initial_Q=initial_Q, exploring_starts=False)
         np.testing.assert_array_equal(initial_Q, 2.0)
         self.assertEqual(agent.evaluation_return[0], 2.0)
         np.testing.assert_array_equal(agent.Q[mdp.terminal_mask], 0)
@@ -144,6 +148,86 @@ class RobustQLearningTests(unittest.TestCase):
         one_step = Tabular_Agent(mdp, 0.0, 0.5)
         one_step.value_iteration(max_iterations=1)
         self.assertEqual(one_step.value_iteration_diagnostics["bellman_residual"], 0)
+
+    def test_q_learning_stops_when_the_full_residual_meets_tolerance(self):
+        mdp = self.small_mdp()
+        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6, seed=2)
+        Q, _ = agent.robust_q_learning(2000, tolerance=1e-6, check_every=25, record_every=37)
+        diagnostics = agent.training_diagnostics
+        self.assertTrue(diagnostics["converged"])
+        self.assertLess(diagnostics["episodes"], 2000)
+        self.assertEqual(diagnostics["episodes"] % 25, 0)
+        self.assertLessEqual(agent.robust_bellman_residual(), diagnostics["tolerance"])
+        self.assertEqual(diagnostics["transitions"], agent.visit_counts.sum())
+        self.assertEqual(agent.evaluation_return[-1], mdp.values_at(mdp.start_state, Q.max(axis=1)))
+        np.testing.assert_allclose(Q, reference_q(mdp, 0.9, 0.25, 0.6), atol=1e-5)
+
+    def test_converged_initialization_needs_no_transitions(self):
+        mdp = self.small_mdp()
+        expected = reference_q(mdp, 0.9, 0.25, 0.6)
+        initial_Q = expected.copy()
+        initial_Q[mdp.terminal_mask] = 99
+        agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.25, C=0.6)
+        with patch.object(mdp, "step", side_effect=AssertionError("No TD updates needed")):
+            Q, _ = agent.robust_q_learning(1, initial_Q=initial_Q)
+        np.testing.assert_allclose(Q, expected)
+        np.testing.assert_array_equal(initial_Q[mdp.terminal_mask], 99)
+        np.testing.assert_array_equal(agent.visit_counts, 0)
+        self.assertEqual(agent.training_diagnostics["episodes"], 0)
+        self.assertEqual(agent.training_diagnostics["transitions"], 0)
+        self.assertTrue(agent.training_diagnostics["converged"])
+        self.assertEqual(len(agent.evaluation_return), 1)
+
+    def test_small_updates_and_unvisited_pairs_cannot_falsely_converge(self):
+        for exploring_starts in (False, True):
+            with self.subTest(exploring_starts=exploring_starts):
+                mdp = self.small_mdp()
+                mdp.max_episode_steps = 1
+                agent = Tabular_Agent(mdp, 0.9, 1e-10, seed=2)
+                cap = len(mdp.trainable_states) * mdp.action_space.n
+                with self.assertRaisesRegex(RuntimeError, "Bellman residual"):
+                    agent.robust_q_learning(cap, exploring_starts=exploring_starts, check_every=1)
+                self.assertFalse(agent.training_diagnostics["converged"])
+                self.assertEqual(agent.training_diagnostics["episodes"], cap)
+                self.assertGreater(agent.training_diagnostics["bellman_residual"], 0.9)
+                self.assertLess(np.max(np.abs(agent.Q)), 1e-6)
+
+    def test_nonfinite_values_cannot_pass_the_residual_check(self):
+        agent = Tabular_Agent(self.small_mdp(), 0.9, 0.5)
+        for value in (np.nan, np.inf, -np.inf):
+            agent.Q.fill(value)
+            self.assertEqual(agent.robust_bellman_residual(), np.inf)
+
+    def test_failed_value_iteration_replaces_previous_success_diagnostics(self):
+        agent = Tabular_Agent(self.small_mdp(), 0.9, 0.5)
+        agent.value_iteration()
+        self.assertTrue(agent.value_iteration_diagnostics["converged"])
+        with self.assertRaisesRegex(RuntimeError, "did not converge"):
+            agent.value_iteration(max_iterations=1)
+        self.assertFalse(agent.value_iteration_diagnostics["converged"])
+        self.assertEqual(agent.value_iteration_diagnostics["iterations"], 1)
+
+    def test_invalid_convergence_settings_are_rejected(self):
+        agent = Tabular_Agent(self.small_mdp(), 0.9, 0.5)
+        for settings in ({"tolerance": 0}, {"tolerance": np.nan}, {"check_every": 0}):
+            with self.subTest(settings=settings), self.assertRaises(ValueError):
+                agent.robust_q_learning(10, **settings)
+
+
+class LearningCurveTests(unittest.TestCase):
+    def test_stopped_curves_retain_their_final_value_and_longer_runs_are_kept(self):
+        curves = [[0, 1], [0, 0.5, 0.8, 1.2], [2]]
+        mean, std, samples = calc_evaluation_return_mean_std(curves)
+        expected = np.array([[0, 1, 1, 1], [0, 0.5, 0.8, 1.2], [2, 2, 2, 2]])
+        np.testing.assert_array_equal(samples, expected)
+        np.testing.assert_allclose(mean, expected.mean(axis=0))
+        np.testing.assert_allclose(std, expected.std(axis=0))
+        self.assertEqual(curves, [[0, 1], [0, 0.5, 0.8, 1.2], [2]])
+
+    def test_empty_learning_curves_are_rejected(self):
+        for curves in ([], [[]], [[0], []]):
+            with self.subTest(curves=curves), self.assertRaises(ValueError):
+                calc_evaluation_return_mean_std(curves)
 
 if __name__ == "__main__":
     unittest.main()

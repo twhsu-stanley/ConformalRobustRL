@@ -23,11 +23,12 @@ METHOD_SETTINGS = {
 
 
 def main(
-    mdp, n_deployment_episodes=30, gamma=0.95, horizon=100, training_episodes=4000, R_hat_init=0.1,
+    mdp, n_deployment_episodes=30, gamma=0.95, horizon=100, training_episodes=20000, R_hat_init=0.1,
     delta=0.1, delta_1=None, eta=0.01, calibration_window=100, quantile_max = 3.0,
     pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
     method="proposed", R=None, C=None, R_star=0.2, shift_period=100,
     verbose=True, trial=1, q_initializer=None,
+    training_tolerance=1e-6, training_check_every=100,
 ):
     """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
 
@@ -35,6 +36,7 @@ def main(
     'R_contamination_0.5' fix R_used at 0.1 and 0.5, respectively, with C_used=infinity.
     R=None enables mismatch estimation; C=None enables ACP and calibration pilots.
     Fixed R/C disable the corresponding updates and allow policy reuse when both are fixed.
+    training_episodes caps Algorithm 1; its full Bellman residual must meet training_tolerance.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
     The supplied obstacle map stays fixed throughout the run. Each episode has
     a fixed disturbance law whose support bound varies slowly within [0.5, 1.5],
@@ -64,6 +66,7 @@ def main(
     controller = ConformallyRobustController(
         mdp, gamma=gamma, horizon=horizon, training_horizon=horizon,
         training_episodes=training_episodes, R_hat_init=R_hat_init,
+        training_tolerance=training_tolerance, training_check_every=training_check_every,
         delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
         calibration_scores=calibration_scores, calibration_window=calibration_window,
         pilot_episodes=pilot_episodes, seed=seed, R=R, C=C,
@@ -136,7 +139,7 @@ if __name__ == "__main__":
     seeds = (23, 67, 87, 101, 922)
     methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
     n_deployment_episodes = 100
-    training_episodes = 5000
+    training_episodes = 20000
     pilot_episodes = 100
     R_star = 0.4
     shift_period = 100

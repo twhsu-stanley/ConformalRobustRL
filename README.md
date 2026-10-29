@@ -27,8 +27,8 @@ ordinary arguments and the settings under `if __name__ == "__main__"`; there is
 no command-line parser.
 
 The online script runs five trials with seeds `(23, 67, 87, 101, 922)`, 100
-deployment episodes per method, 5,000 nominal training episodes per policy
-computation, and 100 random-policy pilot episodes for adaptive C. It uses discount
+deployment episodes per method, a 20,000-episode nominal training safety cap per
+policy computation, and 100 random-policy pilot episodes for adaptive C. It uses discount
 0.9, a 100-transition episode limit, initial R estimate 0.1, ACP target and initial
 delta 0.1, learning rate eta 0.1, and a calibration window of 100 scores.
 
@@ -96,7 +96,23 @@ a supplied finite Q-table. Pass the table through
 `agent.robust_q_learning(..., initial_Q=predicted_Q)`. Terminal rows are zeroed after
 initialization and never receive TD updates. Initial cached values and diagnostics
 are derived from the initialized table. The default case does not import transformer
-libraries or require a checkpoint and retains the same training behavior.
+libraries or require a checkpoint.
+
+Both solvers stop when the full robust Bellman residual
+`max(abs(T_R_C(Q) - Q))` meets `tolerance`, with terminal rows fixed at zero.
+Q-learning checks after initialization, every `check_every` episodes, and at its
+`max_episodes` safety cap. Its defaults are `tolerance=1e-6` and `check_every=100`.
+The controller and robot entry points expose these as `training_tolerance` and
+`training_check_every`; `training_episodes` is the maximum episode budget.
+An accurate initial table can converge with zero training transitions. Small TD
+updates alone do not establish convergence, because unvisited pairs and decaying
+learning rates can hide large Bellman errors.
+
+Value iteration retains `tolerance=1e-8` and `max_iterations=10000` by default.
+Each solver records its actual work, residual, tolerance, and `converged` status
+in its diagnostics. Reaching a safety cap without convergence raises an error;
+the controller does not deploy that policy. Fixed-R,C learning-curve plots keep
+each converged trial at its final value when averaging runs of different lengths.
 
 For finite C, `mdp.localized_uncertainty_states(nominal_next_state, C)` returns
 actual grid-coordinate pairs, including outside cells, using equations (3)-(4):
