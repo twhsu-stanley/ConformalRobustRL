@@ -21,14 +21,15 @@ def format_prompt(description, R, C):
 
 
 def generate_q_data(
-    mdps, R_values, C_values, gamma, output_path, *, n_maps=None,
+    mdps, R_values, C_values, output_path, *, n_maps=None,
     tolerance=1e-8, max_iterations=10000,
 ):
     """Save numeric Q targets, storing each distinct map description only once.
 
     mdps is an iterable of nominal MDPs. Environment construction and randomized
     map generation belong to the example, not to this shared learning code.
-    Use consistent geometry, action ordering, and rewards throughout a dataset.
+    Each MDP supplies its discount. Use consistent geometry, action ordering,
+    rewards, and discount throughout a dataset.
     Supply n_maps for a progress total when mdps is a generator without a length.
     """
     R_values, C_values = tuple(R_values), tuple(C_values)
@@ -54,7 +55,7 @@ def generate_q_data(
             seen.add(description)
             map_index = len(descriptions)
             descriptions.append(description)
-            agent = Tabular_Agent(mdp, gamma=gamma, lr_init=0.5)
+            agent = Tabular_Agent(mdp, lr_init=0.5)
             if targets and agent.Q.shape != targets[0].shape:
                 raise ValueError("All training maps must have the same Q-table shape.")
             for R in R_values:

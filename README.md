@@ -49,6 +49,24 @@ The R-contamination baselines use prescribed R values as in Wang and Zou.
 When both R and C are fixed, the controller trains once and reuses the policy.
 Otherwise it recomputes the policy each deployment episode.
 
+Every `Robot2DMotionMDP` construction must explicitly specify `x_max`, `y_max`,
+`grid_shape`, `start_cell`, `goal_cell`, `gamma`, `movement_reward`, and
+`goal_reward`. These are required keyword arguments with no defaults. For example:
+
+```python
+mdp = Robot2DMotionMDP(
+    x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+    gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+)
+```
+
+The experiment scripts explicitly use a 10-by-10 workspace and grid, discount 0.9,
+free-motion reward 0, and goal-command reward 1, with their own maps and endpoints.
+Dataset generation randomizes maps and endpoints while preserving the template
+MDP's rewards and discount. Clones explicitly copy all eight required settings.
+The agent, controller, value-iteration labels, and deployment returns read the
+discount from the MDP; these consumers have no separate `gamma` argument.
+
 ## Global grid and terminal states
 
 The grid extends over the entire plane. A state is an integer coordinate pair
@@ -101,9 +119,9 @@ libraries or require a checkpoint.
 Both solvers stop when the full robust Bellman residual
 `max(abs(T_R_C(Q) - Q))` meets `tolerance`, with terminal rows fixed at zero.
 Q-learning checks after initialization, every `check_every` episodes, and at its
-`max_episodes` safety cap. Its defaults are `tolerance=1e-6` and `check_every=100`.
+`max_training_episodes` safety cap. Its defaults are `tolerance=1e-6` and `check_every=100`.
 The controller and robot entry points expose these as `training_tolerance` and
-`training_check_every`; `training_episodes` is the maximum episode budget.
+`training_check_every`; `max_training_episodes` is the maximum episode budget.
 An accurate initial table can converge with zero training transitions. Small TD
 updates alone do not establish convergence, because unvisited pairs and decaying
 learning rates can hide large Bellman errors.
@@ -269,8 +287,10 @@ training transitions; they are not sampled deployment returns.
 
 ## Optional transformer warm start
 
-Zero initialization remains the default in both entry points. Transformer code is
-shared across examples in `q_transformer/`; it contains no robot or 2-D imports:
+The entry-point functions use zero initialization unless `q_initializer` is supplied.
+The fixed-R/C script currently enables its saved transformer checkpoint in the
+main block; set `checkpoint_path=None` there for zeros. Transformer code is shared
+across examples in `q_transformer/`; it contains no robot or 2-D imports:
 
 - `data.py` generates numeric Q-table labels using robust value iteration and
   randomly splits individual samples with seed 42, matching the original code.
@@ -297,8 +317,8 @@ python -m robot_2d.train_robot_2d_transformer
 ```
 
 `generate_robot_2d_q_data.py` supplies the MDP, random map generation, R/C values,
-and discount. Its defaults match the online example's geometry, rewards, and
-discount, with 3,000 maps containing 20-30 obstacles. Each map first samples random
+and the template MDP. Its script generates 2,500 maps containing 20-30 obstacles,
+using the explicitly configured geometry, rewards, and discount. Each map first samples random
 start and goal cells with physical cell-center distance at least
 `start_goal_seperation=7.5`. Obstacles then retain the two-cell clearance from both
 endpoints and a nominal start-to-goal path. The seed controls endpoint and obstacle
@@ -336,7 +356,7 @@ loads once and is shared across trials and methods. Programmatic use is:
 from q_transformer.model import QTransformerPredictor
 
 predictor = QTransformerPredictor("robot_2d/saved_results/q_transformer/checkpoint")
-controller = ConformallyRobustController(mdp, gamma=0.9, q_initializer=predictor)
+controller = ConformallyRobustController(mdp, q_initializer=predictor)
 ```
 
 The controller supplies the actual `R_used` and `C_used` before each policy
@@ -346,10 +366,10 @@ Leave `checkpoint_path=None` or omit `q_initializer` for zero initialization.
 Any callable with signature `(mdp, R_used, C_used)` can supply an alternative
 initializer, without changing the agent or importing transformer dependencies.
 
-The fixed-R/C entry point also accepts `q_initializer`, but needs a checkpoint
-trained with its own reward and discount settings (`movement_reward=0.01`,
-`gamma=0.95`). Match geometry, action ordering, rewards, and discount in the
-generation and deployment configurations. The predictor checks the Q-table shape.
+The fixed-R/C entry point also accepts `q_initializer` and uses the same configured
+rewards and discount as the dataset generator and online example. Match geometry,
+action ordering, rewards, and discount in generation and deployment configurations.
+The predictor checks the Q-table shape.
 Each checkpoint has a fixed shape; a 3-D example uses the same implementation
 with its own MDP, training configuration, and checkpoint. Training infers state
 and action counts from the Q labels; the checkpoint stores just these dimensions

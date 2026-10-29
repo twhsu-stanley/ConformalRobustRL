@@ -14,11 +14,11 @@ from Tabular_Agent import Tabular_Agent
 
 
 def main(
-    *, R=0.15, C=1.2, gamma=0.95, training_episodes=20000, n_trials=15,
+    *, R=0.15, C=1.2, max_training_episodes=20000, n_trials=15,
     horizon=100, seed=7, output_dir=None, q_initializer=None,
     training_tolerance=1e-6, training_check_every=100,
 ):
-    """Train to the Bellman tolerance, using training_episodes as a safety cap."""
+    """Train to the Bellman tolerance, using max_training_episodes as a safety cap."""
     if not isinstance(n_trials, (int, np.integer)) or n_trials < 1:
         raise ValueError("n_trials must be a positive integer.")
     if output_dir is None:
@@ -26,23 +26,21 @@ def main(
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     mdp = Robot2DMotionMDP(
-        x_max=10.0, y_max=10.0, grid_shape=(10, 10),
-        obstacles=[(5, 1), (1, 3), (5, 6)],
-        start_cell=(0, 0), goal_cell=(9, 9), movement_reward=0.01, goal_reward=1.0,
-        noise_probability=0.0, noise_radius=0.0, noise_sampler=None,
-        max_episode_steps=horizon,
+        x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+        gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+        obstacles=[(5, 1), (1, 3), (5, 6)], max_episode_steps=horizon,
     )
     evaluation_return = []
     agents = []
     for trial in range(n_trials):
         agent = Tabular_Agent(
-            mdp, gamma=gamma, lr_init=0.5, step_start_decay_lr=100000,
+            mdp, lr_init=0.5, step_start_decay_lr=100000,
             epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
             R=R, C=C, seed=None if seed is None else seed + trial,
         )
         initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
         agent.robust_q_learning(
-            training_episodes, record_every=1, initial_Q=initial_Q,
+            max_training_episodes, record_every=1, initial_Q=initial_Q,
             tolerance=training_tolerance, check_every=training_check_every,
         )
         evaluation_return.append(agent.evaluation_return.copy())
@@ -70,7 +68,7 @@ def main(
 if __name__ == "__main__":
     # Set to None to use zero initialization instead of the trained transformer.
     checkpoint_path = (
-        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint-365625"
+        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint-376875"
     )
     q_initializer = None
     if checkpoint_path is not None:

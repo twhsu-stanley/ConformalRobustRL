@@ -24,10 +24,12 @@ class ContinuousDeploymentTests(unittest.TestCase):
     def test_noise_is_continuous_and_positions_are_retained_before_discretization(self):
         sampler = lambda position, rng: np.array([0.2, 0.1])
         mdp = Robot2DMotionMDP(
-            noise_sampler=sampler, max_episode_steps=2,
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, noise_sampler=sampler,
+            max_episode_steps=2,
         )
         policy = np.zeros(mdp.n_state, dtype=int)
-        row = mdp.deploy_policy(policy, 0.95, start_position=(3.2, 2.7))
+        row = mdp.deploy_policy(policy, start_position=(3.2, 2.7))
         np.testing.assert_allclose(row["positions"], [(3.2, 2.7), (4.7, 2.6), (5.7, 2.6)])
         np.testing.assert_allclose(row["nominal_positions"], [(4.5, 2.5), (5.5, 2.5)])
         np.testing.assert_allclose(row["deviations"], np.sqrt(0.05))
@@ -44,9 +46,11 @@ class ContinuousDeploymentTests(unittest.TestCase):
             return np.array([-1.0, 0.0])
 
         mdp = Robot2DMotionMDP(
-            noise_sampler=sampler, max_episode_steps=4,
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, noise_sampler=sampler,
+            max_episode_steps=4,
         )
-        row = mdp.deploy_policy(np.ones(mdp.n_state, dtype=int), 0.95)
+        row = mdp.deploy_policy(np.ones(mdp.n_state, dtype=int))
         np.testing.assert_allclose(row["positions"], [(0.5, 0.5), (-0.5, 0.5)])
         np.testing.assert_allclose(row["deviation_vectors"], [(-1, 0)])
         np.testing.assert_array_equal(row["states"][1:], [(-1, 0)])
@@ -62,12 +66,14 @@ class ContinuousDeploymentTests(unittest.TestCase):
 
     def test_upper_boundary_landing_is_a_distinct_outside_cell(self):
         mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0,
             noise_sampler=lambda position, rng: np.array([0.5, 0.0]), max_episode_steps=1,
         )
-        row = mdp.deploy_policy(lambda state: 0, 0.95, start_position=(6.5, 0.5))
-        np.testing.assert_array_equal(row["positions"], [(6.5, 0.5), (8, 0.5)])
+        row = mdp.deploy_policy(lambda state: 0, start_position=(8.5, 0.5))
+        np.testing.assert_array_equal(row["positions"], [(8.5, 0.5), (10, 0.5)])
         np.testing.assert_array_equal(row["deviation_vectors"], [(0.5, 0)])
-        np.testing.assert_array_equal(row["states"][-1], (8, 0))
+        np.testing.assert_array_equal(row["states"][-1], (10, 0))
         self.assertEqual(row["episode_mismatches"], 1)
         self.assertEqual(row["score"], 0.5)
         self.assertTrue(row["workspace_exit"])
@@ -75,8 +81,9 @@ class ContinuousDeploymentTests(unittest.TestCase):
 
     def test_obstacle_landing_is_recorded_as_the_last_transition(self):
         mdp = Robot2DMotionMDP(
-            obstacles=[(1, 0)], noise_sampler=lambda position, rng: np.array([1.0, 0.0]),
-            max_episode_steps=3,
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 0)],
+            noise_sampler=lambda position, rng: np.array([1.0, 0.0]), max_episode_steps=3,
         )
         seen = []
 
@@ -84,7 +91,7 @@ class ContinuousDeploymentTests(unittest.TestCase):
             seen.append(state)
             return 1
 
-        row = mdp.deploy_policy(policy, 0.95)
+        row = mdp.deploy_policy(policy)
         self.assertEqual(seen, [mdp.start_state])
         np.testing.assert_allclose(row["positions"], [(0.5, 0.5), (1.0, 0.5)])
         self.assertTrue(row["collision"])
@@ -99,13 +106,15 @@ class ContinuousDeploymentTests(unittest.TestCase):
             return np.array([0.2, 0.0])
 
         mdp = Robot2DMotionMDP(
-            noise_sampler=sampler, max_episode_steps=3,
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, noise_sampler=sampler,
+            max_episode_steps=3,
         )
         row = mdp.deploy_policy(
-            np.zeros(mdp.n_state, dtype=int), 0.95, start_position=(6.2, 7.7),
+            np.zeros(mdp.n_state, dtype=int), start_position=(8.2, 9.7),
         )
-        np.testing.assert_allclose(row["nominal_positions"], [(7.5, 7.5)])
-        np.testing.assert_allclose(row["positions"], [(6.2, 7.7), (7.0, 7.593333333333333)])
+        np.testing.assert_allclose(row["nominal_positions"], [(9.5, 9.5)])
+        np.testing.assert_allclose(row["positions"], [(8.2, 9.7), (9.0, 9.593333333333334)])
         np.testing.assert_allclose(row["deviation_vectors"], [(0.2, 0)])
         self.assertEqual(row["score"], 0.2)
         np.testing.assert_array_equal(row["mismatches"], [0])
@@ -116,7 +125,11 @@ class ContinuousDeploymentTests(unittest.TestCase):
         self.assertEqual(len(samples), 1)
 
     def test_reference_is_uniform_including_goal_obstacles_and_boundaries(self):
-        mdp = Robot2DMotionMDP(noise_probability=0.3, noise_radius=1.2)
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, noise_probability=0.3,
+            noise_radius=1.2,
+        )
         probabilities = mismatch_probabilities(mdp)
         cases = [((2, 2), 0), ((0, 2), 1), ((0, 0), 1), ((7, 7), 0), ((2, 1), 0)]
         for cell, action in cases:
@@ -125,9 +138,11 @@ class ContinuousDeploymentTests(unittest.TestCase):
 
     def test_time_limit_counts_only_nonterminal_transitions(self):
         mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0,
             noise_sampler=lambda position, rng: np.array([0.2, 0.0]), max_episode_steps=3,
         )
-        row = mdp.deploy_policy(np.ones(mdp.n_state, dtype=int), 0.95)
+        row = mdp.deploy_policy(np.ones(mdp.n_state, dtype=int))
         self.assertTrue(row["timeout"])
         self.assertEqual(row["episode_length"], 3)
         self.assertFalse(row["goal_reached"] or row["collision"] or row["workspace_exit"])
@@ -147,8 +162,11 @@ class OnlineSettingsTests(unittest.TestCase):
             for method in ("nominal", "R_contamination_0.1", "R_contamination_0.5"):
                 with self.subTest(method=method):
                     controller = main(
-                        Robot2DMotionMDP(), method=method, n_deployment_episodes=2,
-                        training_episodes=10, horizon=5, pilot_episodes=20,
+                        Robot2DMotionMDP(
+                            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                            goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                        ), method=method, n_deployment_episodes=2,
+                        max_training_episodes=10, horizon=5, pilot_episodes=20,
                         calibration_scores=[], delta=2, eta=0, calibration_window=0,
                         save_plots=True, verbose=False,
                     )
@@ -176,7 +194,10 @@ class OnlineSettingsTests(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix="robot_paired_maps_") as directory,
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
-            mdp = Robot2DMotionMDP(x_max=10, y_max=10, grid_shape=(10, 10))
+            mdp = Robot2DMotionMDP(
+                x_max=10, y_max=10, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+                gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+            )
             randomize_obstacles(mdp, np.random.default_rng(87))
             trial_map = mdp.obstacle_mask.copy()
             observed_maps = []
@@ -190,13 +211,14 @@ class OnlineSettingsTests(unittest.TestCase):
             self.addCleanup(map_observer.stop)
             map_observer.start()
             proposed = main(
-                mdp=mdp, n_deployment_episodes=4, training_episodes=20, horizon=7, pilot_episodes=3,
+                mdp=mdp, n_deployment_episodes=4, max_training_episodes=20,
+                horizon=7, pilot_episodes=3,
                 seed=87, shift_period=10, save_plots=False, verbose=False,
             )
             methods = ("nominal", "R_contamination_0.1", "R_contamination_0.5")
             for index, method in enumerate(methods, 1):
                 other = main(
-                    mdp=mdp, method=method, n_deployment_episodes=2, training_episodes=10,
+                    mdp=mdp, method=method, n_deployment_episodes=2, max_training_episodes=10,
                     horizon=7, pilot_episodes=0,
                     seed=87 + 100000 * index, shift_period=10,
                     save_plots=False, verbose=False,
@@ -226,8 +248,11 @@ class OnlineSettingsTests(unittest.TestCase):
             for method, expected_R in methods.items():
                 with self.subTest(method=method):
                     controller = main(
-                        mdp=Robot2DMotionMDP(),
-                        method=method, n_deployment_episodes=2, training_episodes=10, horizon=5,
+                        mdp=Robot2DMotionMDP(
+                            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                            goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                        ),
+                        method=method, n_deployment_episodes=2, max_training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20, R_hat_init=0.8,
                         save_plots=False, verbose=False,
                     )
@@ -272,8 +297,11 @@ class OnlineSettingsTests(unittest.TestCase):
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
             fixed = main(
-                mdp=Robot2DMotionMDP(),
-                n_deployment_episodes=2, training_episodes=10, horizon=5, R=0.2, C=0.7,
+                mdp=Robot2DMotionMDP(
+                    x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                    goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                ),
+                n_deployment_episodes=2, max_training_episodes=10, horizon=5, R=0.2, C=0.7,
                 calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
             )
             self.assertTrue(all(row["R_used"] == 0.2 for row in fixed.history))
@@ -282,8 +310,11 @@ class OnlineSettingsTests(unittest.TestCase):
             self.assertIsNone(fixed.R_hat)
             self.assertTrue(fixed.history[-1]["training_reused"])
             adaptive = main(
-                mdp=Robot2DMotionMDP(),
-                n_deployment_episodes=2, training_episodes=10, horizon=5,
+                mdp=Robot2DMotionMDP(
+                    x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                    goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                ),
+                n_deployment_episodes=2, max_training_episodes=10, horizon=5,
                 calibration_scores=[0.1] * 20,
                 save_plots=False, verbose=False,
             )
@@ -308,8 +339,11 @@ class OnlineSettingsTests(unittest.TestCase):
             for name, settings in cases.items():
                 with self.subTest(setting=name):
                     controller = main(
-                        mdp=Robot2DMotionMDP(),
-                        n_deployment_episodes=1, training_episodes=10, horizon=5,
+                        mdp=Robot2DMotionMDP(
+                            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                            goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                        ),
+                        n_deployment_episodes=1, max_training_episodes=10, horizon=5,
                         calibration_scores=[0.1] * 20, save_plots=False, verbose=False,
                         **settings,
                     )
@@ -348,7 +382,10 @@ class OnlineSettingsTests(unittest.TestCase):
             for settings in (dict(R=0.3), dict(C=0.7)):
                 with self.subTest(settings=settings):
                     controller = main(
-                        Robot2DMotionMDP(), n_deployment_episodes=2, training_episodes=10,
+                        Robot2DMotionMDP(
+                            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                            goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                        ), n_deployment_episodes=2, max_training_episodes=10,
                         horizon=5, pilot_episodes=2, save_plots=True, verbose=False, **settings,
                     )
                     name = f"proposed_R{controller.fixed_R}_C{controller.fixed_C}_trial_1"
@@ -377,10 +414,13 @@ class OnlineSettingsTests(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix="robot_shifting_noise_") as directory,
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
         ):
-            mdp = Robot2DMotionMDP()
+            mdp = Robot2DMotionMDP(
+                x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+                gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+            )
             randomize_obstacles(mdp, np.random.default_rng(7))
             controller = main(
-                mdp=mdp, n_deployment_episodes=3, training_episodes=10, horizon=20,
+                mdp=mdp, n_deployment_episodes=3, max_training_episodes=10, horizon=20,
                 calibration_scores=[0.6] * 20, shift_period=10,
                 save_plots=True, verbose=False,
             )
@@ -416,11 +456,12 @@ class OnlineSettingsTests(unittest.TestCase):
 
     def test_first_step_exit_counts_for_R_and_updates_ACP(self):
         mdp = Robot2DMotionMDP(
-            x_max=2, y_max=2, grid_shape=(2, 2), noise_radius=10,
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.9,
+            movement_reward=0.0, goal_reward=1.0, noise_radius=10,
             noise_sampler=lambda position, rng: np.array([10.0, 0.0]),
         )
         controller = ConformallyRobustController(
-            mdp, horizon=5, training_episodes=2000, calibration_scores=[0.1] * 20,
+            mdp, horizon=5, max_training_episodes=2000, calibration_scores=[0.1] * 20,
             R_hat_init=0, seed=7,
         )
         record = controller.run_episode()

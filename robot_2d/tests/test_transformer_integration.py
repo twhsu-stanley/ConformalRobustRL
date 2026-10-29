@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from q_transformer.data import format_prompt
+from q_transformer.data import format_prompt, generate_q_data
 from robot_2d.generate_robot_2d_q_data import randomize_start_goal, training_maps
 from robot_2d.main_robot_2d import main as train_fixed
 from robot_2d.main_robot_2d_online import main as run_online
@@ -16,8 +16,24 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 
 class TransformerIntegrationTests(unittest.TestCase):
+    def test_generated_targets_use_the_template_MDP_discount(self):
+        template = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.43,
+            movement_reward=0.0, goal_reward=1.0,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "q_data.npz"
+            generate_q_data([template.clone(nominal=True)], (0,), (0,), path)
+            with np.load(path, allow_pickle=False) as data:
+                Q = data["Q"][0]
+                self.assertAlmostEqual(Q[0].max(), 0.43)
+                self.assertEqual(Q[1, 2], 1.0)
+
     def test_context_describes_grid_and_endpoints_but_excludes_unknown_disturbances(self):
-        mdp = Robot2DMotionMDP()
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(2, 1)],
+        )
         description = mdp.q_transformer_context()
         rows = description.split("\n\n", 1)[1].splitlines()[:mdp.ny]
         grid = np.array([[int(cell) for cell in row.split()] for row in rows])
@@ -35,7 +51,8 @@ class TransformerIntegrationTests(unittest.TestCase):
 
     def test_training_maps_keep_template_unchanged_and_randomize_endpoints(self):
         template = Robot2DMotionMDP(
-            x_max=10, y_max=10, grid_shape=(10, 10), start_cell=(1, 1), goal_cell=(7, 6),
+            x_max=10, y_max=10, grid_shape=(10, 10), start_cell=(1, 1), goal_cell=(7, 6), gamma=0.9,
+            movement_reward=0.0, goal_reward=1.0,
         )
         maps = list(training_maps(template, 3, n_obstacles=(10, 30), seed=7))
         self.assertEqual(np.count_nonzero(template.obstacle_mask), 0)
@@ -66,7 +83,8 @@ class TransformerIntegrationTests(unittest.TestCase):
 
     def test_prompt_keeps_original_instruction_style_and_numeric_grid_orientation(self):
         mdp = Robot2DMotionMDP(
-            x_max=3, y_max=2, grid_shape=(3, 2), obstacles=[(1, 0)], goal_cell=(2, 1),
+            x_max=3, y_max=2, grid_shape=(3, 2), start_cell=(0, 0), goal_cell=(2, 1), gamma=0.9,
+            movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 0)],
         )
         prompt = format_prompt(mdp.q_transformer_context(), 0.3, np.inf)
         self.assertTrue(prompt.startswith("### Instruction:\n"))
@@ -76,7 +94,10 @@ class TransformerIntegrationTests(unittest.TestCase):
         self.assertIn("Predict the Q-table for R = 0.3 and C = infinity.", prompt)
 
     def test_random_endpoints_use_physical_distance_and_repeat_with_the_seed(self):
-        mdp = Robot2DMotionMDP(x_max=6, y_max=3, grid_shape=(3, 3), obstacles=[])
+        mdp = Robot2DMotionMDP(
+            x_max=6, y_max=3, grid_shape=(3, 3), start_cell=(0, 0), goal_cell=(2, 2), gamma=0.9,
+            movement_reward=0.0, goal_reward=1.0, obstacles=[],
+        )
         first_rng, second_rng = np.random.default_rng(7), np.random.default_rng(7)
         for _ in range(20):
             start, goal = randomize_start_goal(mdp, first_rng, start_goal_seperation=4.25)
@@ -102,7 +123,10 @@ class TransformerIntegrationTests(unittest.TestCase):
             directory = Path(directory)
             with patch("robot_2d.main_robot_2d_online.__file__", str(directory / "main.py")):
                 controller = run_online(
-                    Robot2DMotionMDP(), n_deployment_episodes=2, training_episodes=3,
+                    Robot2DMotionMDP(
+                        x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                        goal_cell=(9, 9), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+                    ), n_deployment_episodes=2, max_training_episodes=3,
                     method="nominal", horizon=2, save_plots=False, verbose=False,
                     q_initializer=initializer, training_tolerance=0.5,
                 )
@@ -114,7 +138,7 @@ class TransformerIntegrationTests(unittest.TestCase):
             self.assertNotIn("q_initializer", saved)
             calls.clear()
             train_fixed(
-                training_episodes=2, n_trials=1, horizon=2, output_dir=directory,
+                max_training_episodes=2, n_trials=1, horizon=2, output_dir=directory,
                 q_initializer=initializer, training_tolerance=0.5,
             )
             self.assertEqual(calls, [(0.15, 1.2)])

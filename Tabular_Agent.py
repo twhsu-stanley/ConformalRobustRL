@@ -3,12 +3,11 @@ import gymnasium as gym
 
 
 class Tabular_Agent:
-    """Learn Q-values using the supplied MDP's reward, terminal rules, and uncertainty set."""
+    """Learn Q-values using the supplied MDP's rewards, discount, and uncertainty set."""
 
     def __init__(
         self,
         env: gym.Env,
-        gamma: float,
         lr_init: float,
         step_start_decay_lr: int = 10000,
         epsilon_init: float = 1.0,
@@ -21,15 +20,12 @@ class Tabular_Agent:
         self.env = env
         for name in (
             "reward", "terminal_mask", "states", "state_index", "values_at", "worst_case_value",
-            "nominal_next_state", "trainable_states",
+            "nominal_next_state", "trainable_states", "gamma",
         ):
             if not hasattr(env.unwrapped, name):
                 raise ValueError(f"The MDP must define {name}.")
-        self.gamma = gamma
         self.n_state = len(env.unwrapped.states)
         self.n_action = env.action_space.n
-        if not np.isfinite(gamma) or not 0 <= gamma < 1:
-            raise ValueError("gamma must be in [0, 1).")
         if not np.isfinite(lr_init) or not 0 < lr_init < 1:
             raise ValueError("lr_init must be in (0, 1).")
         if not 0 <= epsilon_lb <= epsilon_init <= 1 or not 0 < epsilon_decay_rate <= 1:
@@ -88,10 +84,10 @@ class Tabular_Agent:
         base = self.env.unwrapped
         nominal_value = base.values_at(nominal_next_state, values)
         if R == 0:
-            return float(reward + self.gamma * nominal_value)
+            return float(reward + base.gamma * nominal_value)
         worst_value = base.worst_case_value(nominal_next_state, C, values)
         next_value = (1 - R) * nominal_value + R * worst_value
-        return float(reward + self.gamma * next_value)
+        return float(reward + base.gamma * next_value)
 
     def robust_bellman_residual(self):
         """Check the robust Bellman equation at every nonterminal state-action pair."""
@@ -150,7 +146,7 @@ class Tabular_Agent:
         return self.Q.copy(), np.argmax(self.Q, axis=1)
 
     def robust_q_learning(
-        self, max_episodes, *, R=None, C=None, exploring_starts=None, record_every=1,
+        self, max_training_episodes, *, R=None, C=None, exploring_starts=None, record_every=1,
         verbose=False, initial_Q=None, tolerance=1e-6, check_every=100,
     ):
         """Algorithm 1, with customizable initialization and a deterministic nominal simulator.
@@ -159,11 +155,11 @@ class Tabular_Agent:
         by each pair's own post-warmup visit count. Infinite visits consequently
         give an infinite learning-rate sum for each learnable pair. Terminal rows
         are fixed at zero; time-limit truncation does not suppress bootstrapping.
-        Stop when the full Bellman residual meets tolerance. max_episodes is a
+        Stop when the full Bellman residual meets tolerance. max_training_episodes is a
         safety cap; reaching it without convergence raises an error.
         """
         for name, value in (
-            ("max_episodes", max_episodes), ("record_every", record_every),
+            ("max_training_episodes", max_training_episodes), ("record_every", record_every),
             ("check_every", check_every),
         ):
             if not isinstance(value, (int, np.integer)) or value < 1:
@@ -202,9 +198,9 @@ class Tabular_Agent:
                 (base.state_index(state), action) for state in base.trainable_states
                 for action in range(self.n_action)
             ])
-        while residual > tolerance and episodes < max_episodes:
+        while residual > tolerance and episodes < max_training_episodes:
             if verbose:
-                print(f"Episode {episodes + 1}/{max_episodes}")
+                print(f"Episode {episodes + 1}/{max_training_episodes}")
             options = None
             first_action = None
             if exploring_starts:
@@ -235,7 +231,7 @@ class Tabular_Agent:
                     break
             episodes += 1
             self.epsilon = max(self.epsilon_lb, self.epsilon * self.epsilon_decay_rate)
-            if episodes % check_every == 0 or episodes == max_episodes:
+            if episodes % check_every == 0 or episodes == max_training_episodes:
                 residual = self.robust_bellman_residual()
         if cumulative_step % record_every != 0:
             self.evaluation_return.append(base.values_at(self.initial_state, values))
@@ -252,7 +248,7 @@ class Tabular_Agent:
         }
         if not self.training_diagnostics["converged"]:
             raise RuntimeError(
-                f"Q-learning did not converge in {max_episodes} episodes: "
+                f"Q-learning did not converge in {max_training_episodes} episodes: "
                 f"Bellman residual {residual:.3g} exceeds tolerance {tolerance:.3g}."
             )
         if verbose:

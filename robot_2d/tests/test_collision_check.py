@@ -14,7 +14,10 @@ from robot_2d.utils import plot_conformal_history
 
 class SegmentCollisionTests(unittest.TestCase):
     def test_crossings_from_both_directions_and_with_rectangular_cells(self):
-        mdp = Robot2DMotionMDP(obstacles=[(2, 1)])
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(2, 1)],
+        )
         cases = (
             ((0.5, 1.5), (4.5, 1.5), (2.0, 1.5)),
             ((4.5, 1.5), (0.5, 1.5), (3.0, 1.5)),
@@ -27,13 +30,19 @@ class SegmentCollisionTests(unittest.TestCase):
                 state, position = mdp._collision_check_segment(start, end)
                 self.assertEqual(state, (2, 1))
                 np.testing.assert_allclose(position, expected)
-        rectangular = Robot2DMotionMDP(x_max=16, y_max=8, obstacles=[(2, 1)])
+        rectangular = Robot2DMotionMDP(
+            x_max=16, y_max=8, grid_shape=(8, 8), start_cell=(0, 0), goal_cell=(7, 7), gamma=0.9,
+            movement_reward=0.0, goal_reward=1.0, obstacles=[(2, 1)],
+        )
         state, position = rectangular._collision_check_segment((1, 1.5), (9, 1.5))
         self.assertEqual(state, (2, 1))
         np.testing.assert_allclose(position, (4, 1.5))
 
     def test_corner_grazing_grid_lines_and_boundary_endpoints(self):
-        mdp = Robot2DMotionMDP(obstacles=[(1, 0)])
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 0)],
+        )
         for start, end in (
             ((0.5, 0.5), (1.5, 1.5)),
             ((0.5, 1.0), (2.5, 1.0)),
@@ -52,20 +61,29 @@ class SegmentCollisionTests(unittest.TestCase):
         self.assertEqual(state, (1, 0))
 
     def test_first_terminal_event_and_obstacle_priority_at_a_corner(self):
-        mdp = Robot2DMotionMDP(goal_cell=(3, 1), obstacles=[(5, 1)])
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(3, 1),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(5, 1)],
+        )
         state, position = mdp._collision_check_segment((0.5, 1.5), (9, 1.5))
         self.assertEqual(state, mdp.goal_state)
         np.testing.assert_allclose(position, (3, 1.5))
         state, position = mdp._collision_check_segment((7.5, 1.5), (0.5, 1.5))
         self.assertEqual(state, (5, 1))
         np.testing.assert_allclose(position, (6, 1.5))
-        mdp = Robot2DMotionMDP(goal_cell=(1, 1), obstacles=[(1, 0)])
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(1, 1),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 0)],
+        )
         state, position = mdp._collision_check_segment((0.5, 0.5), (1.5, 1.5))
         self.assertEqual(state, (1, 0))
         np.testing.assert_allclose(position, (1, 1))
 
     def test_traversal_matches_independent_rectangle_intersections(self):
-        mdp = Robot2DMotionMDP(x_max=16, obstacles=[(2, 1), (3, 4), (5, 6)])
+        mdp = Robot2DMotionMDP(
+            x_max=16, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(2, 1), (3, 4), (5, 6)],
+        )
         rng = np.random.default_rng(37)
         terminal_states = [tuple(s) for s in mdp.states[mdp.terminal_mask]]
         for _ in range(150):
@@ -90,13 +108,19 @@ class SegmentCollisionTests(unittest.TestCase):
                 np.testing.assert_allclose(actual[1], start + parameter * direction, atol=1e-12)
 
     def test_very_long_segments_do_not_merge_distinct_grid_crossings(self):
-        mdp = Robot2DMotionMDP(obstacles=[(1, 1)])
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 1)],
+        )
         state, position = mdp._collision_check_segment((0.5, 0.5), (1e12, 2e12))
         self.assertEqual(state, (1, 1))
         np.testing.assert_allclose(position, (1, 1.5), atol=1e-11)
 
     def test_nominal_training_keeps_its_existing_endpoint_transitions(self):
-        mdp = Robot2DMotionMDP(obstacles=[(1, 0)])
+        mdp = Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 0)],
+        )
         with patch.object(mdp, "_collision_check_segment", side_effect=AssertionError):
             state, _, terminated, _, _ = mdp.step(0)
         np.testing.assert_array_equal(state, (1, 0))
@@ -110,11 +134,13 @@ class ContactCalibrationTests(unittest.TestCase):
             with self.subTest(outcome=outcome):
                 samples = iter(((0.1, 0), (10 if outcome == "workspace_exit" else 1.5, 0)))
                 mdp = Robot2DMotionMDP(
-                    obstacles=[(3, 0)] if outcome == "collision" else [],
-                    goal_cell=(3, 0) if outcome == "goal_reached" else (7, 7),
-                    noise_radius=10, noise_sampler=lambda position, rng: np.array(next(samples)),
+                    x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0),
+                    goal_cell=(3, 0) if outcome == 'goal_reached' else (7, 7), gamma=0.9,
+                    movement_reward=0.0, goal_reward=1.0,
+                    obstacles=[(3, 0)] if outcome == 'collision' else [], noise_radius=10,
+                    noise_sampler=lambda position, rng: np.array(next(samples)),
                 )
-                record = mdp.deploy_policy(np.zeros(mdp.n_state, dtype=int), 0.95)
+                record = mdp.deploy_policy(np.zeros(mdp.n_state, dtype=int))
                 self.assertTrue(record[outcome])
                 self.assertEqual(record["episode_length"], 2)
                 self.assertEqual(record["score"], record["deviations"][-1])
@@ -126,19 +152,22 @@ class ContactCalibrationTests(unittest.TestCase):
     def test_time_limit_retains_the_last_nonterminal_disturbance(self):
         samples = iter(((0.1, 0), (0.4, 0)))
         mdp = Robot2DMotionMDP(
-            obstacles=[], max_episode_steps=2,
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[], max_episode_steps=2,
             noise_sampler=lambda position, rng: np.array(next(samples)),
         )
-        record = mdp.deploy_policy(np.zeros(mdp.n_state, dtype=int), 0.95)
+        record = mdp.deploy_policy(np.zeros(mdp.n_state, dtype=int))
         self.assertTrue(record["timeout"])
         self.assertEqual(record["score"], 0.4)
 
     def test_first_step_contact_keeps_endpoint_mismatch_and_updates_ACP(self):
         mdp = Robot2DMotionMDP(
-            obstacles=[(1, 0)], noise_sampler=lambda position, rng: np.array((1.0, 0)),
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0, obstacles=[(1, 0)],
+            noise_sampler=lambda position, rng: np.array((1.0, 0)),
         )
         controller = ConformallyRobustController(
-            mdp, training_episodes=1, calibration_scores=[0.1] * 10, delta=0.2, seed=5,
+            mdp, max_training_episodes=1, calibration_scores=[0.1] * 10, delta=0.2, seed=5,
         )
         policy = np.zeros(mdp.n_state, dtype=int)
         with patch("conformally_robust_controller.Tabular_Agent.robust_q_learning",
@@ -181,7 +210,10 @@ class ContactCalibrationTests(unittest.TestCase):
                 plt.close(figure)
 
     def test_every_pilot_including_a_zero_score_enters_calibration(self):
-        controller = ConformallyRobustController(Robot2DMotionMDP(), pilot_episodes=3)
+        controller = ConformallyRobustController(Robot2DMotionMDP(
+            x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+        ), pilot_episodes=3)
         records = [{"score": 0.2}, {"score": 0}, {"score": 0.4}]
         with patch.object(controller.deployment_env, "deploy_policy", side_effect=records):
             controller.initialize_calibration()

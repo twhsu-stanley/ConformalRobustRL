@@ -22,7 +22,8 @@ HAS_TRANSFORMER = all(
 class ThreeDimensionalMDP(gym.Env):
     """Two cells and six actions suffice to check that no 2-D shape is hard-coded."""
 
-    def __init__(self, terminal_row=1):
+    def __init__(self, terminal_row=1, gamma=0.9):
+        self.gamma = gamma
         self.states = np.array([(0, 0, 0), (1, 0, 0)])
         self.action_space = gym.spaces.Discrete(6)
         self.terminal_mask = np.arange(2) == terminal_row
@@ -71,7 +72,7 @@ class TransformerDataTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "data.npz"
             maps = [ThreeDimensionalMDP(1), ThreeDimensionalMDP(0), ThreeDimensionalMDP(1)]
-            generate_q_data(maps, (0, 0.3), (0, np.inf), 0.9, path)
+            generate_q_data(maps, (0, 0.3), (0, np.inf), path)
             with np.load(path, allow_pickle=False) as data:
                 self.assertEqual(data["Q"].shape, (8, 2, 6))
                 self.assertEqual(len(data["descriptions"]), 2)
@@ -106,7 +107,10 @@ sys.meta_path.insert(0, BlockTransformerImports())
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from conformally_robust_controller import ConformallyRobustController
 controller = ConformallyRobustController(
-    Robot2DMotionMDP(), R=0, C=0, training_episodes=2, horizon=2,
+    Robot2DMotionMDP(
+        x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+        gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+    ), R=0, C=0, max_training_episodes=2, horizon=2,
     training_tolerance=1.0,
 )
 assert controller.run_episode()['training']['zero_initialized']
@@ -148,7 +152,7 @@ class TransformerModelTests(unittest.TestCase):
             data_path = directory / "data.npz"
             generate_q_data(
                 [ThreeDimensionalMDP(0), ThreeDimensionalMDP(1)], (0, 0.3), (0, np.inf),
-                0.9, data_path,
+                data_path,
             )
             checkpoint = directory / "checkpoint"
             with patch("q_transformer.train.torch.cuda.is_available", return_value=False):
@@ -180,7 +184,7 @@ class TransformerModelTests(unittest.TestCase):
             self.assertTrue(all(
                 not parameter.requires_grad for parameter in predictor.model.parameters()
             ))
-            agent = Tabular_Agent(mdp, 0.9, 0.5, R=0.3, C=np.inf)
+            agent = Tabular_Agent(mdp, 0.5, R=0.3, C=np.inf)
             agent.robust_q_learning(2000, initial_Q=Q)
             self.assertEqual(agent.evaluation_return[0], Q[0].max())
             self.assertFalse(agent.training_diagnostics["zero_initialized"])

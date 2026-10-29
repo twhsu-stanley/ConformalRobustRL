@@ -23,7 +23,7 @@ METHOD_SETTINGS = {
 
 
 def main(
-    mdp, n_deployment_episodes=30, gamma=0.95, horizon=100, training_episodes=20000, R_hat_init=0.1,
+    mdp, n_deployment_episodes=30, horizon=100, max_training_episodes=20000, R_hat_init=0.1,
     delta=0.1, delta_1=None, eta=0.01, calibration_window=100, quantile_max = 3.0,
     pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
     method="proposed", R=None, C=None, R_star=0.2, shift_period=100,
@@ -36,7 +36,7 @@ def main(
     'R_contamination_0.5' fix R_used at 0.1 and 0.5, respectively, with C_used=infinity.
     R=None enables mismatch estimation; C=None enables ACP and calibration pilots.
     Fixed R/C disable the corresponding updates and allow policy reuse when both are fixed.
-    training_episodes caps Algorithm 1; its full Bellman residual must meet training_tolerance.
+    max_training_episodes caps Algorithm 1; its full Bellman residual must meet training_tolerance.
     horizon caps episode length; goal, collision, and exit end deployment earlier.
     The supplied obstacle map stays fixed throughout the run. Each episode has
     a fixed disturbance law whose support bound varies slowly within [0.5, 1.5],
@@ -64,8 +64,8 @@ def main(
         return {"C_star_k": radius}
 
     controller = ConformallyRobustController(
-        mdp, gamma=gamma, horizon=horizon, training_horizon=horizon,
-        training_episodes=training_episodes, R_hat_init=R_hat_init,
+        mdp, horizon=horizon, training_horizon=horizon,
+        max_training_episodes=max_training_episodes, R_hat_init=R_hat_init,
         training_tolerance=training_tolerance, training_check_every=training_check_every,
         delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
         calibration_scores=calibration_scores, calibration_window=calibration_window,
@@ -76,7 +76,7 @@ def main(
     mdp = controller.deployment_env
     results = {
         "method": method, "seed": seed, "trial": trial, "mdp": mdp,
-        "gamma": gamma, "horizon": horizon,
+        "horizon": horizon,
         "R_star": R_star, "shift_period": shift_period,
         "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
         "history": controller.history,
@@ -123,6 +123,7 @@ def main(
 if __name__ == "__main__":
     mdp = Robot2DMotionMDP(
         x_max=10.0, y_max=10.0, grid_shape=(10, 10),
+        start_cell=(1, 1), goal_cell=(7, 6), gamma=0.9, movement_reward=0.0, goal_reward=1.0,
         obstacles=[
             (0, 7), (0, 8), (0, 9),
             (1, 8), (1, 9), 
@@ -133,13 +134,12 @@ if __name__ == "__main__":
             (8, 0), (8, 1), (8, 4), (8, 9),
             (9, 3), (9, 4), (9, 5), (9, 8), (9, 9) 
         ],
-        start_cell=(1, 1), goal_cell=(7, 6), movement_reward=0.0, goal_reward=1.0,
     )
 
     seeds = (23, 67, 87, 101, 922)
     methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
     n_deployment_episodes = 100
-    training_episodes = 20000
+    max_training_episodes = 20000
     pilot_episodes = 100
     R_star = 0.4
     shift_period = 100
@@ -153,9 +153,10 @@ if __name__ == "__main__":
     for trial, seed in enumerate(seeds, 1):
         for index, method in enumerate(methods):
             main(
-                mdp=mdp, gamma=0.9, method=method, seed=seed + 100000 * index,
+                mdp=mdp, method=method, seed=seed + 100000 * index,
                 trial=trial, save_plots=False,
-                n_deployment_episodes=n_deployment_episodes, training_episodes=training_episodes,
+                n_deployment_episodes=n_deployment_episodes,
+                max_training_episodes=max_training_episodes,
                 eta=0.1, calibration_window=100, pilot_episodes=pilot_episodes, quantile_max = 3.0,
                 R_star=R_star, shift_period=shift_period,
                 q_initializer=q_initializer,

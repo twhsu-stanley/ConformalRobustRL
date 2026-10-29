@@ -53,7 +53,7 @@ def training_maps(mdp, n_maps, *, n_obstacles=(10, 30), start_goal_seperation=7.
 
 
 def main(
-    mdp, *, gamma=0.9, n_maps=3000, n_obstacles=(20, 30), start_goal_seperation=7.5, seed=7,
+    mdp, *, n_maps=3000, n_obstacles=(20, 30), start_goal_seperation=7.5, seed=7,
     R_values=(0.0, 0.1, 0.2, 0.3),
     C_values=(0.0, 1.0, 1.75, np.inf),
 ):
@@ -62,16 +62,15 @@ def main(
         mdp, n_maps, n_obstacles=n_obstacles, start_goal_seperation=start_goal_seperation,
         seed=seed,
     )
-    generate_q_data(maps, R_values, C_values, gamma, dataset_path, n_maps=n_maps)
+    generate_q_data(maps, R_values, C_values, dataset_path, n_maps=n_maps)
     print(f"Saved Q-table dataset to {dataset_path}")
     return dataset_path
 
 
 if __name__ == "__main__":
-    # Match the online experiment. For main_robot_2d.py use movement_reward=.01 and gamma=.95.
     mdp = Robot2DMotionMDP(
-        x_max=10, y_max=10, grid_shape=(10, 10), obstacles=[],
-        movement_reward=0.0, goal_reward=1.0,
+        x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9),
+        gamma=0.9, movement_reward=0.0, goal_reward=1.0,
     )
-    main(mdp, gamma=0.9, n_maps=2500, n_obstacles=(20, 30), start_goal_seperation=7.5,
+    main(mdp, n_maps=2500, n_obstacles=(20, 30), start_goal_seperation=7.5,
         R_values=(0.0, 0.2, 0.4, 0.5), C_values=(0.0, 1.0, 1.75, 3.0, np.inf), seed=7)

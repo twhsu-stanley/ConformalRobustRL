@@ -25,11 +25,11 @@ class ConformallyRobustController:
     Indices are zero-based online and negative for the initial pilot episodes.
     q_initializer(mdp, R_used, C_used) optionally returns the initial Q-table;
     the predictor remains outside the agent and saved experiment results.
-    training_episodes caps Algorithm 1; training_tolerance controls convergence.
+    max_training_episodes caps Algorithm 1; training_tolerance controls convergence.
     """
 
     def __init__(
-        self, mdp, *, gamma=0.95, horizon=100, training_episodes=20000,
+        self, mdp, *, horizon=100, max_training_episodes=20000,
         training_tolerance=1e-6, training_check_every=100,
         training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
         eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100,
@@ -40,7 +40,7 @@ class ConformallyRobustController:
     ):
         Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
         for name, value in (
-            ("horizon", horizon), ("training_episodes", training_episodes),
+            ("horizon", horizon), ("max_training_episodes", max_training_episodes),
             ("training_horizon", training_horizon), ("pilot_episodes", pilot_episodes),
             ("training_check_every", training_check_every),
         ):
@@ -49,13 +49,10 @@ class ConformallyRobustController:
             minimum = 0 if name == "pilot_episodes" else 1
             if not isinstance(value, (int, np.integer)) or value < minimum:
                 raise ValueError(f"{name} must be an integer of at least {minimum}.")
-        if not np.isfinite(gamma) or not 0 <= gamma < 1:
-            raise ValueError("gamma must be in [0, 1).")
         if not np.isfinite(training_tolerance) or training_tolerance <= 0:
             raise ValueError("training_tolerance must be positive and finite.")
-        self.gamma = float(gamma)
         self.horizon = int(horizon)
-        self.training_episodes = int(training_episodes)
+        self.max_training_episodes = int(max_training_episodes)
         self.training_tolerance = float(training_tolerance)
         self.training_check_every = int(training_check_every)
         self.pilot_episodes = int(pilot_episodes) if C is None else 0
@@ -76,7 +73,7 @@ class ConformallyRobustController:
         self.Q = None
         self.policy = None
         self.agent_options = {
-            "gamma": self.gamma, "lr_init": lr_init,
+            "lr_init": lr_init,
             "step_start_decay_lr": step_start_decay_lr, "epsilon_init": epsilon_init,
             "epsilon_lb": epsilon_lb, "epsilon_decay_rate": epsilon_decay_rate,
         }
@@ -110,7 +107,7 @@ class ConformallyRobustController:
         for episode in range(-self.pilot_episodes, 0):
             if self.episode_setup is not None:
                 self.episode_setup(self, episode)
-            record = self.deployment_env.deploy_policy(random_policy, self.gamma)
+            record = self.deployment_env.deploy_policy(random_policy)
             self.pilot_scores.append(record["score"])
         self.acp = ACP(self.pilot_scores, **self.acp_options)
         self.initial_calibration_scores = list(self.acp.scores)
@@ -138,11 +135,11 @@ class ConformallyRobustController:
             if self.q_initializer is not None:
                 initial_Q = self.q_initializer(self.training_env, R_used, C_used)
             self.Q, self.policy = self.agent.robust_q_learning(
-                self.training_episodes, exploring_starts=True, record_every=100,
+                self.max_training_episodes, exploring_starts=True, record_every=100,
                 initial_Q=initial_Q,
                 tolerance=self.training_tolerance, check_every=self.training_check_every,
             )
-        record = self.deployment_env.deploy_policy(self.policy, self.gamma)
+        record = self.deployment_env.deploy_policy(self.policy)
         record.update({
             "episode": len(self.history) + 1, "R_used": R_used,
             "C_used": float(C_used),

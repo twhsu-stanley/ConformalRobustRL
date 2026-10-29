@@ -58,13 +58,29 @@ class ACPTests(unittest.TestCase):
 
 
 class ControllerTests(unittest.TestCase):
+    def test_learning_and_returns_preserve_the_supplied_MDP_discount(self):
+        mdp = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.61,
+            movement_reward=0.0, goal_reward=1.0,
+        )
+        controller = ConformallyRobustController(
+            mdp, R=0, C=0, max_training_episodes=2000, horizon=4, seed=5,
+        )
+        record = controller.run_episode()
+        self.assertEqual(controller.training_env.gamma, 0.61)
+        self.assertEqual(controller.deployment_env.gamma, 0.61)
+        self.assertAlmostEqual(controller.Q[0].max(), 0.61, places=5)
+        self.assertTrue(record["goal_reached"])
+        self.assertAlmostEqual(record["discounted_return"], 0.61)
+
     def controller(self, **kwargs):
         mdp = Robot2DMotionMDP(
-            x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0,
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.9,
+            movement_reward=0, goal_reward=1.0,
             noise_sampler=lambda position, rng: np.array((0.2, 0)),
         )
         options = dict(
-            horizon=4, training_episodes=2000, training_horizon=10, R_hat_init=0.2,
+            horizon=4, max_training_episodes=2000, training_horizon=10, R_hat_init=0.2,
             calibration_scores=[0.1] * 10, delta=0.2, eta=0.1, seed=5,
         )
         options.update(kwargs)
@@ -104,11 +120,12 @@ class ControllerTests(unittest.TestCase):
     def test_variable_episodes_weight_R_by_transitions_and_score_every_episode(self):
         deviations = iter(([0.2, 0], [0.1, 0], [-2.0, 0], [0, 0], [0, 0.6]))
         mdp = Robot2DMotionMDP(
-            x_max=2, y_max=2, grid_shape=(2, 2), noise_radius=2,
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.9,
+            movement_reward=0.0, goal_reward=1.0, noise_radius=2,
             noise_sampler=lambda position, rng: np.array(next(deviations)),
         )
         controller = ConformallyRobustController(
-            mdp, horizon=6, training_episodes=1, calibration_scores=[0.1] * 10,
+            mdp, horizon=6, max_training_episodes=1, calibration_scores=[0.1] * 10,
             delta=0.2, eta=0.1, R_hat_init=0.2,
         )
         policy = np.array([0, 2, 0, 0])
@@ -140,9 +157,12 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(controller.transition_count, record["episode_length"])
 
     def test_zero_noise_stops_at_goal_with_zero_radius_prediction(self):
-        mdp = Robot2DMotionMDP(x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0)
+        mdp = Robot2DMotionMDP(
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.9,
+            movement_reward=0, goal_reward=1.0,
+        )
         controller = ConformallyRobustController(
-            mdp, horizon=6, training_episodes=200, calibration_scores=[0] * 5,
+            mdp, horizon=6, max_training_episodes=200, calibration_scores=[0] * 5,
             R_hat_init=0, delta=0.2, eta=0.1, seed=2,
         )
         controller.acp.delta_k = 1.1
@@ -160,7 +180,7 @@ class ControllerTests(unittest.TestCase):
     def test_fixed_radius_is_validated_and_passed_directly_to_training(self):
         for C in (0.0, 1.0, np.inf):
             with self.subTest(C=C):
-                controller = self.controller(C=C, training_episodes=2000)
+                controller = self.controller(C=C, max_training_episodes=2000)
                 record = controller.run_episode()
                 self.assertNotIn("C_hat", record)
                 self.assertEqual(record["C_used"], C)
@@ -168,7 +188,7 @@ class ControllerTests(unittest.TestCase):
                 self.assertIsNone(controller.acp)
         for C in (np.nan, -0.1):
             with self.subTest(C=C):
-                controller = self.controller(C=0.0, training_episodes=2000)
+                controller = self.controller(C=0.0, max_training_episodes=2000)
                 controller.fixed_C = C
                 with self.assertRaises(ValueError):
                     controller.run_episode()
@@ -176,7 +196,7 @@ class ControllerTests(unittest.TestCase):
     def test_R_and_C_independently_control_updates_and_policy_reuse(self):
         for R, C in ((None, None), (0.3, None), (None, 0.7), (0.3, 0.7)):
             with self.subTest(R=R, C=C):
-                controller = self.controller(R=R, C=C, training_episodes=2000)
+                controller = self.controller(R=R, C=C, max_training_episodes=2000)
                 first = controller.run_episode()
                 first_agent = controller.agent
                 second = controller.run_episode()
@@ -214,10 +234,10 @@ class ControllerTests(unittest.TestCase):
 
     def test_seeded_controllers_repeat_the_same_run(self):
         mdp = Robot2DMotionMDP(
-            x_max=2, y_max=2, grid_shape=(2, 2), movement_reward=0,
-            noise_probability=1, noise_radius=0.3,
+            x_max=2, y_max=2, grid_shape=(2, 2), start_cell=(0, 0), goal_cell=(1, 1), gamma=0.9,
+            movement_reward=0, goal_reward=1.0, noise_probability=1, noise_radius=0.3,
         )
-        options = dict(horizon=6, training_episodes=2000, calibration_scores=[0.1] * 10, seed=5)
+        options = dict(horizon=6, max_training_episodes=2000, calibration_scores=[0.1] * 10, seed=5)
         first = ConformallyRobustController(mdp, **options)
         second = ConformallyRobustController(mdp, **options)
         for left, right in zip(first.run(3), second.run(3)):
@@ -236,7 +256,7 @@ class ControllerTests(unittest.TestCase):
             calls.append((mdp, R_used, C_used))
             return np.full((len(mdp.states), mdp.action_space.n), 0.5)
 
-        adaptive = self.controller(q_initializer=initializer, training_episodes=2000)
+        adaptive = self.controller(q_initializer=initializer, max_training_episodes=2000)
         for record in adaptive.run(2):
             self.assertFalse(record["training"]["zero_initialized"])
         self.assertEqual(len(calls), 2)
@@ -245,7 +265,9 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(call[1:], (record["R_used"], record["C_used"]))
         self.assertFalse(hasattr(adaptive.agent, "q_initializer"))
         calls.clear()
-        fixed = self.controller(q_initializer=initializer, R=0.3, C=np.inf, training_episodes=2000)
+        fixed = self.controller(
+            q_initializer=initializer, R=0.3, C=np.inf, max_training_episodes=2000,
+        )
         fixed.run(2)
         self.assertEqual(len(calls), 1)
         self.assertTrue(fixed.history[1]["training_reused"])
@@ -257,10 +279,10 @@ class ControllerTests(unittest.TestCase):
         self.assertTrue(diagnostics["converged"])
         self.assertEqual(diagnostics["tolerance"], 1e-5)
         self.assertEqual(diagnostics["episodes"] % 7, 0)
-        self.assertLess(diagnostics["episodes"], controller.training_episodes)
+        self.assertLess(diagnostics["episodes"], controller.max_training_episodes)
 
     def test_capped_training_does_not_deploy_an_unconverged_policy(self):
-        controller = self.controller(training_episodes=1, R=0, C=0)
+        controller = self.controller(max_training_episodes=1, R=0, C=0)
         with patch.object(controller.deployment_env, "deploy_policy") as deploy:
             with self.assertRaisesRegex(RuntimeError, "Q-learning did not converge"):
                 controller.run_episode()

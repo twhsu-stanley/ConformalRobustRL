@@ -17,6 +17,7 @@ class Robot2DMotionMDP(gym.Env):
     Deployment applies noise to every observed transition and stops at the goal,
     an obstacle, workspace exit, or the episode step limit.
     Every outside cell is a distinct terminal state with implicit value zero.
+    gamma defines the discounted objective for learning and deployment returns.
 
     A custom noise_sampler(nominal_position, rng) returns a bounded 2-D deviation.
     The default sampler mixes zero deviation with uniform noise in a disk.
@@ -28,11 +29,10 @@ class Robot2DMotionMDP(gym.Env):
     metadata = {"render_modes": []}
     ACTION_NAMES = ("+x", "-x", "+y", "-y")
     ACTION_DIRECTIONS = ((1, 0), (-1, 0), (0, 1), (0, -1))
-    DEFAULT_OBSTACLES = ((2, 1), (5, 1), (1, 3), (4, 3), (6, 4), (2, 5), (5, 6))
 
     def __init__(
-        self, x_max=8.0, y_max=8.0, grid_shape=(8, 8), obstacles=None,
-        start_cell=(0, 0), goal_cell=None, movement_reward=0.01, goal_reward=1.0,
+        self, *, x_max, y_max, grid_shape, start_cell, goal_cell, gamma,
+        movement_reward, goal_reward, obstacles=None,
         noise_probability=0.0, noise_radius=1.2, noise_sampler=None,
         max_episode_steps=100, seed=None,
     ):
@@ -52,6 +52,9 @@ class Robot2DMotionMDP(gym.Env):
         if not isinstance(max_episode_steps, (int, np.integer)) or max_episode_steps < 1:
             raise ValueError("max_episode_steps must be a positive integer.")
         self.max_episode_steps = int(max_episode_steps)
+        if not np.isfinite(gamma) or not 0 <= gamma < 1:
+            raise ValueError("gamma must be in [0, 1).")
+        self.gamma = float(gamma)
         self.movement_reward = self._probability(movement_reward, "movement_reward")
         self.goal_reward = self._probability(goal_reward, "goal_reward")
         if self.goal_reward <= self.movement_reward:
@@ -65,11 +68,8 @@ class Robot2DMotionMDP(gym.Env):
         self.noise_sampler = noise_sampler
         self.is_nominal = noise_sampler is None and self.noise_probability == 0.0
 
-        if obstacles is None:
-            obstacles = self.DEFAULT_OBSTACLES if self.grid_shape == (8, 8) else ()
         self.obstacle_mask = np.zeros((self.ny, self.nx), dtype=bool)
         self.start_state = self._validate_state(start_cell)
-        goal_cell = (self.nx - 1, self.ny - 1) if goal_cell is None else goal_cell
         self.goal_state = self._validate_state(goal_cell)
         self.state_index(self.start_state)
         self.state_index(self.goal_state)
@@ -81,7 +81,7 @@ class Robot2DMotionMDP(gym.Env):
         self.nominal_transitions = np.zeros((self.n_state, 4, 2), dtype=int)
         self.rewards = np.zeros((self.n_state, 4), dtype=float)
         self.boundary_commands = np.zeros((self.n_state, 4), dtype=bool)
-        self.set_obstacles(obstacles)
+        self.set_obstacles(() if obstacles is None else obstacles)
         self.reset(seed=seed)
 
     @staticmethod
@@ -366,7 +366,7 @@ class Robot2DMotionMDP(gym.Env):
             terminated, truncated, info,
         )
 
-    def deploy_policy(self, policy, gamma, start_position=None):
+    def deploy_policy(self, policy, start_position=None):
         """Record each transition and score every disturbance, including the terminal one."""
         options = None if start_position is None else {"position": start_position}
         _, info = self.reset(options=options)
@@ -400,7 +400,7 @@ class Robot2DMotionMDP(gym.Env):
             "rewards": np.asarray(rewards), "deviations": np.asarray(deviations),
             "mismatches": np.asarray(mismatches), "episode_length": length,
             "score": score, "episode_mismatches": sum(mismatches),
-            "discounted_return": float(np.dot(gamma**np.arange(len(rewards)), rewards)),
+            "discounted_return": float(np.dot(self.gamma**np.arange(len(rewards)), rewards)),
             "goal_reached": info["goal_reached"], "collision": info["collision"],
             "workspace_exit": info["workspace_exit"], "timeout": bool(truncated),
             "goal_step": length if info["goal_reached"] else None,
@@ -410,13 +410,13 @@ class Robot2DMotionMDP(gym.Env):
         }
 
     def clone(self, *, nominal=False, max_episode_steps=None, seed=None):
-        """Create an independent rollout instance with the same map and reward function."""
+        """Create an independent rollout instance with the same map, rewards, and discount."""
         obstacle_cells = [(int(ix), int(iy)) for iy, ix in np.argwhere(self.obstacle_mask)]
         horizon = self.max_episode_steps if max_episode_steps is None else max_episode_steps
         return Robot2DMotionMDP(
             x_max=self.bounds[0], y_max=self.bounds[1], grid_shape=self.grid_shape,
             obstacles=obstacle_cells, start_cell=self.start_state, goal_cell=self.goal_state,
-            movement_reward=self.movement_reward, goal_reward=self.goal_reward,
+            gamma=self.gamma, movement_reward=self.movement_reward, goal_reward=self.goal_reward,
             noise_probability=0.0 if nominal else self.noise_probability,
             noise_radius=self.noise_radius, noise_sampler=None if nominal else self.noise_sampler,
             max_episode_steps=horizon, seed=seed,
