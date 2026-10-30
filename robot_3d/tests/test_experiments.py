@@ -39,7 +39,7 @@ def small_runner_mdp(**settings):
 
 
 class DatasetTests(unittest.TestCase):
-    def test_random_maps_have_ten_unit_endpoint_separation_and_complete_coordinate_prompts(self):
+    def test_random_maps_have_ten_unit_endpoint_separation_and_complete_grid_prompts(self):
         template = Robot3DMotionMDP(
             x_max=10, y_max=10, z_max=10, grid_shape=(10, 10, 10),
             start_cell=(0, 0, 0), goal_cell=(9, 9, 9), gamma=0.9,
@@ -54,14 +54,14 @@ class DatasetTests(unittest.TestCase):
             distance = np.linalg.norm(mdp.coordinates(mdp.start_state) -
                                       mdp.coordinates(mdp.goal_state))
             self.assertGreaterEqual(distance, 10.0)
-            self.assertTrue(20 <= mdp.obstacle_mask.sum() <= 30)
+            self.assertTrue(250 <= mdp.obstacle_mask.sum() <= 350)
             context = mdp.q_transformer_context()
-            header = "Obstacle cells are at coordinates (x, y, z):\n"
-            rows = context.split(header)[1].split("\nAll other cells")[0]
-            cells = [tuple(map(int, line.split())) for line in rows.splitlines()]
-            expected = [tuple(map(int, cell[::-1])) for cell in np.argwhere(mdp.obstacle_mask)]
-            self.assertEqual(cells, expected)
-            for cell in cells:
+            grid = context.split("0 = free space, 1 = obstacle.\n\n")[1].split("\nStart at ")[0]
+            layers = grid.split("\n\n")
+            parsed = np.array([[list(map(int, row.split())) for row in layer.splitlines()]
+                               for layer in layers])
+            np.testing.assert_array_equal(parsed, mdp.obstacle_mask)
+            for cell in np.argwhere(mdp.obstacle_mask)[:, ::-1]:
                 for endpoint in (mdp.start_state, mdp.goal_state):
                     self.assertGreaterEqual(max(abs(a - b) for a, b in zip(cell, endpoint)), 2)
             prompt = format_prompt(context, 0.2, 1.75)

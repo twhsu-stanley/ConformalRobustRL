@@ -218,8 +218,8 @@ class Robot2DMotionMDP(gym.Env):
         """Return the numeric grid and navigation instructions for the shared prompt."""
         grid = "\n".join(" ".join(map(str, row.astype(int))) for row in self.obstacle_mask)
         return (
-            f"You are given a grid with size {self.nx}x{self.ny}.\n"
-            "The maze is a 2D grid with rows in increasing y and columns in increasing x.\n"
+            f"The workspace is a 2D grid with size {self.nx}x{self.ny}.\n"
+            "Rows increase in y and columns increase in x.\n"
             "0 = free space, 1 = obstacle.\n\n"
             f"{grid}\n"
             f"Start at {self.start_state} and move to the goal state at {self.goal_state}.\n"

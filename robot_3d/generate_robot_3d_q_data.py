@@ -30,7 +30,7 @@ def randomize_start_goal(mdp, rng, start_goal_seperation=10.0):
     return tuple(map(int, mdp.states[start_row])), tuple(map(int, mdp.states[goal_row]))
 
 
-def training_maps(mdp, n_maps, *, n_obstacles=(20, 30), start_goal_seperation=10.0, seed=7):
+def training_maps(mdp, n_maps, *, n_obstacles=(250, 350), start_goal_seperation=10.0, seed=7):
     """Randomize endpoints, then obstacles, retaining a nominal start-to-goal path."""
     if not isinstance(n_maps, (int, np.integer)) or n_maps < 2:
         raise ValueError("n_maps must be an integer of at least two.")
@@ -53,7 +53,7 @@ def training_maps(mdp, n_maps, *, n_obstacles=(20, 30), start_goal_seperation=10
 
 
 def main(
-    mdp, *, n_maps=2500, n_obstacles=(20, 30), start_goal_seperation=10.0, seed=7,
+    mdp, *, n_maps=3000, n_obstacles=(250, 350), start_goal_seperation=10.0, seed=7,
     R_values=(0.0, 0.2, 0.4, 0.5),
     C_values=(0.0, 1.0, 1.75, 3.0, np.inf),
 ):

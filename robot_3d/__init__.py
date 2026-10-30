@@ -13,6 +13,12 @@ Configure runs in the scripts' main blocks. To enable warm starts after training
 set checkpoint_path to Path(__file__).resolve().parent /
 "saved_results/q_transformer/checkpoint". Leave it None for zero initialization.
 
+The transformer uses full 0/1 grids ordered by increasing z, then y, then x.
+Training extends BERT to 1,536 tokens, retaining all pretrained weights and the
+original positional embeddings while initializing the additional positions.
+Saved checkpoints include the extended configuration and tokenizer for inference.
+Regenerate datasets saved with obstacle-coordinate prompts before training.
+
 The 3-D runners allow up to 200,000 Q-learning episodes, check the full Bellman
 residual every 1,000 episodes at tolerance 1e-6, and use a 10,000,000-transition
 constant-learning-rate warmup before the shared per-pair decay. These larger
