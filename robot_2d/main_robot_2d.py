@@ -68,7 +68,7 @@ def main(
 if __name__ == "__main__":
     # Set to None to use zero initialization instead of the trained transformer.
     checkpoint_path = (
-        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint-376875"
+        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint-562500"
     )
     q_initializer = None
     if checkpoint_path is not None:
