@@ -32,6 +32,7 @@ def main(
     )
     evaluation_return = []
     agents = []
+    initializer_type = "zero init" if q_initializer is None else "transformer-based warm start"
     for trial in range(n_trials):
         agent = Tabular_Agent(
             mdp, lr_init=0.5, step_start_decay_lr=100000,
@@ -39,17 +40,23 @@ def main(
             R=R, C=C, seed=None if seed is None else seed + trial,
         )
         initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
+        agent.initialize_q(initial_Q)
+        initial_bellman_error = agent.robust_bellman_residual()
+        print(
+            f"Trial {trial + 1} ({initializer_type}): R={R}, C={C},"
+            f"  initial Bellman error={initial_bellman_error:.6g}", flush=True,
+        )
         agent.robust_q_learning(
-            max_training_episodes, record_every=1, initial_Q=initial_Q,
+            max_training_episodes, record_every=1, initial_Q=agent.Q,
             tolerance=training_tolerance, check_every=training_check_every,
         )
         evaluation_return.append(agent.evaluation_return.copy())
         agents.append(agent)
         print(
-            f"Trial {trial + 1}: R={R}, C={C}, "
-            f"V(start)={evaluation_return[-1][-1]:.4f}, "
+            f"  V(start)={evaluation_return[-1][-1]:.4f}, "
             f"training episodes={agent.training_diagnostics['episodes']}, "
-            f"Bellman residual={agent.training_diagnostics['bellman_residual']:.3g}",
+            f"global time steps={agent.training_diagnostics['transitions']}, "
+            f"final Bellman error={agent.training_diagnostics['bellman_residual']:.6g}",
         )
 
     filename = output_dir / f"robot_2d_R{R}_C{C}.pkl"
@@ -76,7 +83,8 @@ if __name__ == "__main__":
         q_initializer = QTransformerPredictor(checkpoint_path)
 
     # Fix C = 1.0, compare different R values
-    main(R=0.0, C=1.0, q_initializer=q_initializer)
+    main(R=0.0, C=1.0, q_initializer=None, n_trials=5)
+    main(R=0.0, C=1.0, q_initializer=q_initializer, n_trials=5)
 
     main(R=0.1, C=1.0, q_initializer=q_initializer)
 
