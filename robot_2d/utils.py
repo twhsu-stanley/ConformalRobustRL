@@ -75,21 +75,28 @@ def plot_robot_map(mdp, axis):
         axis.text(x, y, label, ha="center", va="center", weight="bold")
 
 
-def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
+def plot_robot_motion(
+    mdp, Q, policy, trajectory=None, title="Robot motion", *, value_format=".2f",
+):
     """Plot values, direction commands, and an optional continuous trajectory."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
     extent = (0, mdp.bounds[0], 0, mdp.bounds[1])
     values = np.max(Q, axis=1).reshape(mdp.ny, mdp.nx)
     image = axes[0].imshow(values, origin="lower", extent=extent, cmap="YlGnBu")
-    fig.colorbar(image, ax=axes[0], label="Learned robust value")
+    fig.colorbar(image, ax=axes[0], label="Value V(s)")
     for axis in axes:
         plot_robot_map(mdp, axis)
-    for state in mdp.trainable_states:
+    for state in mdp.states:
         state = tuple(state)
         row = mdp.state_index(state)
         x, y = mdp.coordinates(state)
-        value_y = y - 0.2 * mdp.cell_widths[1] if state == mdp.start_state else y
-        axes[0].text(x, value_y, f"{np.max(Q[row]):.2f}", ha="center", va="center", fontsize=7)
+        is_endpoint = state in (mdp.start_state, mdp.goal_state)
+        value_y = y - 0.2 * mdp.cell_widths[1] if is_endpoint else y
+        color = "white" if mdp.obstacle_mask[state[1], state[0]] else "black"
+        axes[0].text(x, value_y, format(np.max(Q[row]), value_format), ha="center",
+                     va="center", fontsize=7, color=color)
+        if mdp.terminal_mask[row]:
+            continue
         direction = np.asarray(mdp.ACTION_DIRECTIONS[int(policy[row])])
         dx, dy = direction * mdp.cell_widths * 0.28
         axes[1].arrow(
