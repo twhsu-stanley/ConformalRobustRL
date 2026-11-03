@@ -149,6 +149,26 @@ class TransformerTests(unittest.TestCase):
             self.assertTrue(np.all(np.isfinite(full_Q)))
             np.testing.assert_array_equal(full_Q[full_mdp.terminal_mask], 0)
 
+            with (
+                patch("robot_3d.train_robot_3d_transformer.__file__", script),
+                patch("q_transformer.train.torch.cuda.is_available", return_value=False),
+            ):
+                continued_history = train_transformer(
+                    epochs=3, batch_size=4, learning_rate=0.005,
+                    head_learning_rate=5e-5, position_learning_rate=2.5e-5,
+                    resume_from_checkpoint=output / "checkpoint/checkpoint-6",
+                    restart_lr_schedule=True,
+                )
+            self.assertEqual(continued_history[-1]["epoch"], 3)
+            continued = QTransformerPredictor(output / "checkpoint/checkpoint-9", device="cpu")
+            self.assertEqual(continued.model.encoder.config.max_position_embeddings, 1536)
+            self.assertTrue(np.all(np.isfinite(continued(template, 0.3, 0.6))))
+            schedule = torch.load(
+                output / "checkpoint/checkpoint-9/scheduler.pt", weights_only=True,
+            )
+            self.assertEqual(schedule["start_step"], 6)
+            self.assertEqual(schedule["num_training_steps"], 3)
+
             np.savez_compressed(
                 dataset, descriptions=np.array(["free " * 600]), map_index=np.array([0, 0]),
                 R=np.array([0, 0.3]), C=np.array([0, 0.6]), Q=np.zeros((2, 8, 6)),
