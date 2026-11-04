@@ -293,17 +293,20 @@ set `checkpoint_path=None` there for zeros. Transformer code is shared
 across examples in `q_transformer/`; it contains no robot or 2-D imports:
 
 - `data.py` generates numeric Q-table labels using robust value iteration and
-  randomly splits individual samples with seed 42, matching the original code.
+  provides seeded splitting. Both example training scripts split by map, keeping
+  all R/C variants of a map together in either training or validation.
 - `model.py` implements the supplied encoder/mean-pooling/regression architecture
   and frozen checkpoint inference. R and C condition the input; only Q is predicted.
-- `train.py` fine-tunes the encoder and Q head with Huber loss using the original
-  settings: 100 epochs, batch size 4, learning rate 1e-5, and weight decay 0.01.
-  Hugging Face Trainer uses AdamW, linear learning-rate decay, no warmup, and
-  gradient clipping at 1.0. CUDA training uses FP16. Head weights start uniformly
-  in [-1, 1]. It logs every 50 steps and saves each epoch and the final model.
-  It uses 90% of samples for training and 10% for validation; different R/C variants
-  of the same map can occur in both. As in the original, automatic validation and
-  selection by validation loss are disabled; the online experiment uses the final model.
+- `train.py` fine-tunes the encoder and Q head with Huber loss and AdamW.
+  Both examples use a 100-epoch limit, weight decay 0.01, gradient clipping at 1.0,
+  one batch per optimizer update, and linear learning-rate decay with 5% warmup.
+  They reserve 10% of maps for validation, evaluate each epoch, and select the best
+  checkpoint by validation RMSE. Early stopping has patience five evaluations and
+  an improvement threshold of 1e-5. Up to five numbered checkpoints are retained.
+  Both request BF16 when CUDA supports it, with FP16 fallback on other CUDA GPUs
+  and FP32 on CPU; supported GPUs also enable TF32. The 2-D script retains batch
+  size 4, learning rate 1e-5, and pretrained BERT's 512 positions. Head weights
+  start uniformly in [-1, 1]. Logging occurs at global step one and every 50 updates.
 
 Training automatically selects an NVIDIA CUDA GPU when available and falls back
 to CPU with FP32 otherwise. The startup message shows the selected device and
@@ -362,8 +365,8 @@ downloads the configured pretrained encoder/tokenizer; an existing local encoder
 directory can instead be assigned to `model_name`.
 The 3-D training script retains its checkpoint-50640 resume configuration. For a fresh
 run, set `resume_from_checkpoint=None` and `restart_lr_schedule=False`, and select the
-desired learning rates. Its `training_options` overrides the example defaults;
-`callbacks=[]` disables its default early stopping.
+desired learning rates. In either script, `training_options` overrides the example
+defaults; `callbacks=[]` disables default early stopping.
 
 Data and weights go to `robot_2d/saved_results/q_transformer/`:
 
