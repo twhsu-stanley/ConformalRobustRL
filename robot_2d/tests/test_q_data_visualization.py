@@ -14,10 +14,12 @@ import numpy as np
 
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from robot_2d.utils import plot_robot_motion
-from robot_2d.visualize_robot_2d_q_data import (
-    _mdp_from_description, _nominal_policy_trajectory, main,
-)
+from robot_2d.visualize_robot_2d_q_data import _mdp_from_description, _nominal_policy_trajectory
 from Tabular_Agent import Tabular_Agent
+from tests.script_runner import script_entrypoint
+
+
+main = script_entrypoint("robot_2d.visualize_robot_2d_q_data", "fig", positional=('index',))
 
 
 class DatasetVisualizationTests(unittest.TestCase):

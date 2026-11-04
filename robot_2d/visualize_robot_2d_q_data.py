@@ -66,8 +66,10 @@ def _nominal_policy_trajectory(mdp, Q):
     return policy, np.asarray(trajectory)
 
 
-def main(index=1, *, show=True):
-    """Display data point index (one-based: 1 through N); return the unsaved figure."""
+if __name__ == "__main__":
+    index = 49
+    show = True
+
     data_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
     dataset_path = data_dir / "q_data_2d.npz"
     with np.load(dataset_path, allow_pickle=False) as data:
@@ -88,8 +90,3 @@ def main(index=1, *, show=True):
     fig.axes[1].set_title("Greedy policy and nominal trajectory")
     if show:
         plt.show()
-    return fig
-
-
-if __name__ == "__main__":
-    main(index=49)

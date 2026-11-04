@@ -18,13 +18,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 from gymnasium.utils.env_checker import check_env
 
-from robot_2d.main_robot_2d import main as single_main
-from robot_2d.main_robot_2d_online import main as run_online
-from robot_2d.plot_fixedRC_eval_returns import main as plot_saved_returns
-from robot_2d.plot_fixedRC_value_policy import main as plot_saved_policy
 from robot_2d.utils import plot_robot_2d_tabular
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
+from tests.script_runner import script_entrypoint
+
+
+single_main = script_entrypoint("robot_2d.main_robot_2d", "evaluation_return")
+run_online = script_entrypoint("robot_2d.main_robot_2d_online", "controller", positional=('mdp',))
+plot_saved_returns = script_entrypoint("robot_2d.plot_fixedRC_eval_returns", "figures")
+plot_saved_policy = script_entrypoint("robot_2d.plot_fixedRC_value_policy", "fig")
 
 
 # Deployment/storage tests use a loose certificate; solver accuracy is tested separately.

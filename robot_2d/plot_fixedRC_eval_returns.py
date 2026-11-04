@@ -13,10 +13,10 @@ if not __package__:
 from utils_tabular import calc_evaluation_return_mean_std
 
 
-def main(*, data_dir=None, show=True):
-    if data_dir is None:
-        data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
-    data_dir = Path(data_dir)
+if __name__ == "__main__":
+    data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
+    show = True
+
     comparisons = (
         (
             "Fixed C = 1.0", ((0.0, 1.0), (0.1, 1.0), (0.2, 1.0)),
@@ -51,8 +51,3 @@ def main(*, data_dir=None, show=True):
         figures.append(fig)
     if show:
         plt.show()
-    return figures
-
-
-if __name__ == "__main__":
-    main()

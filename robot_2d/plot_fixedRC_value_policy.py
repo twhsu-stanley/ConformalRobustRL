@@ -13,27 +13,22 @@ if not __package__:
 from robot_2d.utils import plot_robot_2d_tabular
 
 
-def main(*, R=0.2, C=1.0, trial=0, data_dir=None):
-    """Load one saved trial, plot its values and policy, and save the figure."""
-    if data_dir is None:
-        data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
-    data_dir = Path(data_dir)
-    filename = data_dir / f"robot_2d_R{R}_C{C}_agents.pkl"
-    with open(filename, "rb") as f:
-        saved = pickle.load(f)
-    if not isinstance(trial, (int, np.integer)) or not 0 <= trial < len(saved["agents"]):
-        raise ValueError("trial must be a valid zero-based saved trial index.")
-    fig = plot_robot_2d_tabular(saved["mdp"], saved["agents"][trial], show=False)
-    filename = data_dir / f"robot_2d_R{R}_C{C}_trial{trial + 1}_value_policy.png"
-    fig.savefig(filename, dpi=300, bbox_inches="tight")
-    print(f"Saved value and policy plot to {filename.resolve()}")
-    
-    return fig
-
-
 if __name__ == "__main__":
-    main(R=0.2, C=1.0)
+    data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
+    trial = 0
+    show = True
+    combinations = ((0.2, 1.0), (0.2, 2.0))
 
-    main(R=0.2, C=2.0)
+    for R, C in combinations:
+        filename = data_dir / f"robot_2d_R{R}_C{C}_agents.pkl"
+        with open(filename, "rb") as f:
+            saved = pickle.load(f)
+        if not isinstance(trial, (int, np.integer)) or not 0 <= trial < len(saved["agents"]):
+            raise ValueError("trial must be a valid zero-based saved trial index.")
+        fig = plot_robot_2d_tabular(saved["mdp"], saved["agents"][trial], show=False)
+        filename = data_dir / f"robot_2d_R{R}_C{C}_trial{trial + 1}_value_policy.png"
+        fig.savefig(filename, dpi=300, bbox_inches="tight")
+        print(f"Saved value and policy plot to {filename.resolve()}")
 
-    plt.show()
+    if show:
+        plt.show()

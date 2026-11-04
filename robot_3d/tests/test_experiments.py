@@ -17,15 +17,21 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from q_transformer.data import format_prompt
-from robot_3d.generate_robot_3d_q_data import main as generate_data
 from robot_3d.generate_robot_3d_q_data import randomize_start_goal, training_maps
-from robot_3d.main_robot_3d import main as train_fixed
-from robot_3d.main_robot_3d_online import METHOD_SETTINGS, main as run_online
-from robot_3d.plot_fixedRC_eval_returns import main as plot_returns
-from robot_3d.plot_fixedRC_value_policy import main as plot_policy
+from robot_3d.main_robot_3d_online import METHOD_SETTINGS
 from robot_3d.plot_online_comparison import plot_comparison
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 from robot_3d.utils import plot_robot_map, plot_robot_motion
+from tests.script_runner import script_entrypoint
+
+
+generate_data = script_entrypoint(
+    "robot_3d.generate_robot_3d_q_data", "dataset_path", positional=('mdp',),
+)
+train_fixed = script_entrypoint("robot_3d.main_robot_3d", "evaluation_return")
+run_online = script_entrypoint("robot_3d.main_robot_3d_online", "controller", positional=('mdp',))
+plot_returns = script_entrypoint("robot_3d.plot_fixedRC_eval_returns", "figures")
+plot_policy = script_entrypoint("robot_3d.plot_fixedRC_value_policy", "fig")
 
 
 def small_runner_mdp(**settings):

@@ -10,9 +10,12 @@ import numpy as np
 
 from q_transformer.data import format_prompt, generate_q_data
 from robot_2d.generate_robot_2d_q_data import randomize_start_goal, training_maps
-from robot_2d.main_robot_2d import main as train_fixed
-from robot_2d.main_robot_2d_online import main as run_online
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+from tests.script_runner import script_entrypoint
+
+
+train_fixed = script_entrypoint("robot_2d.main_robot_2d", "evaluation_return")
+run_online = script_entrypoint("robot_2d.main_robot_2d_online", "controller", positional=('mdp',))
 
 
 class TransformerIntegrationTests(unittest.TestCase):

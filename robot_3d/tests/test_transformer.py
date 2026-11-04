@@ -11,8 +11,11 @@ import numpy as np
 from q_transformer.data import format_prompt, generate_q_data
 from robot_3d.generate_robot_3d_q_data import training_maps
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-from robot_3d.train_robot_3d_transformer import main as train_transformer
 from Tabular_Agent import Tabular_Agent
+from tests.script_runner import script_entrypoint
+
+
+train_transformer = script_entrypoint("robot_3d.train_robot_3d_transformer", "history")
 
 
 HAS_TRANSFORMER = all(importlib.util.find_spec(name)

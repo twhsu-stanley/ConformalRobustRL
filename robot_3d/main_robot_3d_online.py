@@ -22,105 +22,6 @@ METHOD_SETTINGS = {
 }
 
 
-def main(
-    mdp, n_deployment_episodes=30, horizon=100, max_training_episodes=200000, R_hat_init=0.1,
-    delta=0.1, delta_1=None, eta=0.01, calibration_window=100, quantile_max=3.0,
-    pilot_episodes=20, calibration_scores=None, seed=7, save_plots=True,
-    method="proposed", R=None, C=None, R_star=0.2, shift_period=100,
-    verbose=True, trial=1, q_initializer=None,
-    training_tolerance=1e-6, training_check_every=1000,
-):
-    """R/C=None selects online estimation/calibration; numeric R/C keeps it fixed.
-
-    method='nominal' plans with R=C=0. Methods 'R_contamination_0.1' and
-    'R_contamination_0.5' fix R_used at 0.1 and 0.5, respectively, with C_used=infinity.
-    R=None enables mismatch estimation; C=None enables ACP and calibration pilots.
-    Fixed R/C disable the corresponding updates and allow policy reuse when both are fixed.
-    max_training_episodes caps Algorithm 1; its full Bellman residual must meet training_tolerance.
-    horizon caps episode length; goal, collision, and exit end deployment earlier.
-    The supplied obstacle map stays fixed throughout the run. Each episode has
-    a fixed disturbance law whose support bound varies slowly within [0.5, 1.5],
-    while R_star stays constant.
-    These true simulator parameters are not supplied to the Q-learning agent.
-    The trial loop passes the fixed map to every method and trial. Matching
-    shift_period gives methods the same support schedule even when pilots are skipped.
-    """
-    if method not in METHOD_SETTINGS:
-        raise ValueError(f"Unknown method: {method}.")
-    if method != "proposed":
-        R, C, _ = METHOD_SETTINGS[method]
-    if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
-        raise ValueError("This shifting-noise experiment requires unit grid cells.")
-    if not np.isfinite(R_star) or not 0 < R_star < 1:
-        raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
-
-    def prepare_episode(controller, episode):
-        radius = C_star_shift(episode, shift_period)
-        controller.deployment_env.noise_radius = radius
-        controller.deployment_env.noise_sampler = partial(
-            sample_deviation, radius=radius, R_star=R_star,
-        )
-        controller.deployment_env.is_nominal = False
-        return {"C_star_k": radius}
-
-    controller = ConformallyRobustController(
-        mdp, horizon=horizon, training_horizon=horizon,
-        max_training_episodes=max_training_episodes, R_hat_init=R_hat_init,
-        step_start_decay_lr=10000000,
-        training_tolerance=training_tolerance, training_check_every=training_check_every,
-        delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
-        calibration_scores=calibration_scores, calibration_window=calibration_window,
-        pilot_episodes=pilot_episodes, seed=seed, R=R, C=C,
-        episode_setup=prepare_episode, q_initializer=q_initializer,
-    )
-    controller.run(n_deployment_episodes, verbose=verbose)
-    mdp = controller.deployment_env
-    results = {
-        "method": method, "seed": seed, "trial": trial, "mdp": mdp,
-        "horizon": horizon,
-        "R_star": R_star, "shift_period": shift_period,
-        "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
-        "history": controller.history,
-        "Q": controller.Q, "policy": controller.policy,
-        "visit_counts": controller.agent.visit_counts,
-    }
-    if controller.fixed_R is None:
-        results["final_R"] = controller.R_hat
-    if controller.acp is not None:
-        results.update({
-            "delta": delta, "delta_1": delta_1,
-            "eta": eta, "calibration_window": calibration_window,
-            "pilot_scores": controller.pilot_scores,
-            "initial_calibration_scores": controller.initial_calibration_scores,
-            "final_delta": controller.acp.delta_k,
-        })
-    output_dir = Path(__file__).resolve().parent / "saved_results/online"
-    output_dir.mkdir(parents=True, exist_ok=True)
-    test_name = f"{method}_R{controller.fixed_R}_C{controller.fixed_C}_trial_{trial}"
-    filename = output_dir / f"results_{test_name}.pkl"
-    with filename.open("wb") as file:
-        pickle.dump(results, file)
-
-    if save_plots:
-        import matplotlib
-        matplotlib.use("Agg")
-        from robot_3d.utils import plot_conformal_history, plot_robot_motion
-        import matplotlib.pyplot as plt
-        if controller.fixed_R is None or controller.acp is not None:
-            fig = plot_conformal_history(controller.history, controller.delta)
-            fig.savefig(output_dir / f"online_uncertainty_{test_name}.png", dpi=160)
-            plt.close(fig)
-        fig = plot_robot_motion(
-            mdp, controller.Q, controller.policy, controller.history[-1]["positions"],
-            f"Final {method} policy",
-        )
-        fig.savefig(output_dir / f"final_policy_{test_name}.png", dpi=160)
-        plt.close(fig)
-    if verbose:
-        print(f"Saved results to {filename.resolve()}")
-    return controller
-
-
 if __name__ == "__main__":
     mdp = Robot3DMotionMDP(
         x_max=10.0, y_max=10.0, z_max=10.0, grid_shape=(10, 10, 10),
@@ -135,28 +36,108 @@ if __name__ == "__main__":
         ],
     )
 
-    seeds = (23, 67, 87, 101, 922)
-    methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
     n_deployment_episodes = 100
+    horizon = 100
     max_training_episodes = 200000
+    R_hat_init = 0.1
+    delta = 0.1
+    delta_1 = None
+    eta = 0.1
+    calibration_window = 100
+    quantile_max = 3.0
     pilot_episodes = 100
+    calibration_scores = None
+    save_plots = False
+    R = None
+    C = None
     R_star = 0.4
     shift_period = 100
-    # Leave None for the original zero initialization; otherwise set a checkpoint directory.
+    verbose = True
+    training_tolerance = 1e-6
+    training_check_every = 1000
+    seeds = (23, 67, 87, 101, 922)
+    first_trial = 1
+    methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
+
     checkpoint_path = None
     q_initializer = None
     if checkpoint_path is not None:
         from robot_3d.transformer import QTransformerPredictor
         q_initializer = QTransformerPredictor(checkpoint_path)
 
-    for trial, seed in enumerate(seeds, 1):
+    if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
+        raise ValueError("This shifting-noise experiment requires unit grid cells.")
+    if not np.isfinite(R_star) or not 0 < R_star < 1:
+        raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
+
+    def prepare_episode(controller, episode):
+        radius = C_star_shift(episode, shift_period)
+        controller.deployment_env.noise_radius = radius
+        controller.deployment_env.noise_sampler = partial(
+            sample_deviation, radius=radius, R_star=R_star,
+        )
+        controller.deployment_env.is_nominal = False
+        return {"C_star_k": radius}
+
+    for trial, trial_seed in enumerate(seeds, first_trial):
         for index, method in enumerate(methods):
-            main(
-                mdp=mdp, method=method, seed=seed + 100000 * index,
-                trial=trial, save_plots=False,
-                n_deployment_episodes=n_deployment_episodes,
-                max_training_episodes=max_training_episodes,
-                eta=0.1, calibration_window=100, pilot_episodes=pilot_episodes, quantile_max=3.0,
-                R_star=R_star, shift_period=shift_period,
-                q_initializer=q_initializer,
+            seed = trial_seed + 100000 * index
+            if method not in METHOD_SETTINGS:
+                raise ValueError(f"Unknown method: {method}.")
+            fixed_R, fixed_C = (R, C) if method == "proposed" else METHOD_SETTINGS[method][:2]
+            controller = ConformallyRobustController(
+                mdp, horizon=horizon, training_horizon=horizon,
+                max_training_episodes=max_training_episodes, R_hat_init=R_hat_init,
+                step_start_decay_lr=10000000,
+                training_tolerance=training_tolerance, training_check_every=training_check_every,
+                delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
+                calibration_scores=calibration_scores, calibration_window=calibration_window,
+                pilot_episodes=pilot_episodes, seed=seed, R=fixed_R, C=fixed_C,
+                episode_setup=prepare_episode, q_initializer=q_initializer,
             )
+            controller.run(n_deployment_episodes, verbose=verbose)
+            deployment_mdp = controller.deployment_env
+            results = {
+                "method": method, "seed": seed, "trial": trial, "mdp": deployment_mdp,
+                "horizon": horizon,
+                "R_star": R_star, "shift_period": shift_period,
+                "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
+                "history": controller.history,
+                "Q": controller.Q, "policy": controller.policy,
+                "visit_counts": controller.agent.visit_counts,
+            }
+            if controller.fixed_R is None:
+                results["final_R"] = controller.R_hat
+            if controller.acp is not None:
+                results.update({
+                    "delta": delta, "delta_1": delta_1,
+                    "eta": eta, "calibration_window": calibration_window,
+                    "pilot_scores": controller.pilot_scores,
+                    "initial_calibration_scores": controller.initial_calibration_scores,
+                    "final_delta": controller.acp.delta_k,
+                })
+            output_dir = Path(__file__).resolve().parent / "saved_results/online"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            test_name = f"{method}_R{controller.fixed_R}_C{controller.fixed_C}_trial_{trial}"
+            filename = output_dir / f"results_{test_name}.pkl"
+            with filename.open("wb") as file:
+                pickle.dump(results, file)
+
+            if save_plots:
+                import matplotlib
+                matplotlib.use("Agg")
+                from robot_3d.utils import plot_conformal_history, plot_robot_motion
+                import matplotlib.pyplot as plt
+                if controller.fixed_R is None or controller.acp is not None:
+                    fig = plot_conformal_history(controller.history, controller.delta)
+                    fig.savefig(output_dir / f"online_uncertainty_{test_name}.png", dpi=160)
+                    plt.close(fig)
+                fig = plot_robot_motion(
+                    deployment_mdp, controller.Q, controller.policy,
+                    controller.history[-1]["positions"],
+                    f"Final {method} policy",
+                )
+                fig.savefig(output_dir / f"final_policy_{test_name}.png", dpi=160)
+                plt.close(fig)
+            if verbose:
+                print(f"Saved results to {filename.resolve()}")

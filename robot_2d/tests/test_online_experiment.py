@@ -10,10 +10,13 @@ from unittest.mock import patch
 import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
-from robot_2d.main_robot_2d_online import main as run_online
 from robot_2d.utils import randomize_obstacles
 from robot_2d.plot_online_comparison import mismatch_probabilities
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+from tests.script_runner import script_entrypoint
+
+
+run_online = script_entrypoint("robot_2d.main_robot_2d_online", "controller", positional=('mdp',))
 
 
 # These tests cover deployment bookkeeping; strict convergence is tested in test_tabular_agent.

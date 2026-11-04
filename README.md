@@ -22,9 +22,8 @@ python -m robot_2d.plot_online_comparison
 On Windows, create the environment with `py -m venv .venv` and activate it with
 `.\.venv\Scripts\Activate.ps1` in PowerShell before running the `python` commands.
 Select `.venv/bin/python` (Windows: `.venv\Scripts\python.exe`) as the IDE interpreter.
-The scripts also support direct execution. Configure experiments through the
-ordinary arguments and the settings under `if __name__ == "__main__"`; there is
-no command-line parser.
+The scripts also support direct execution. Configure experiments by editing the
+settings under `if __name__ == "__main__"`; there is no command-line parser.
 
 The online script runs five trials with seeds `(23, 67, 87, 101, 922)`, 100
 deployment episodes per method, a 20,000-episode nominal training safety cap per
@@ -287,9 +286,10 @@ training transitions; they are not sampled deployment returns.
 
 ## Optional transformer warm start
 
-The entry-point functions use zero initialization unless `q_initializer` is supplied.
-The fixed-R/C script currently enables its saved transformer checkpoint in the
-main block; set `checkpoint_path=None` there for zeros. Transformer code is shared
+Executable scripts keep their settings and workflow under `if __name__ == "__main__":`.
+Edit the settings there, then run the script or module; importing it does not run experiments.
+The fixed-R/C 2-D script currently enables its saved transformer checkpoint;
+set `checkpoint_path=None` there for zeros. Transformer code is shared
 across examples in `q_transformer/`; it contains no robot or 2-D imports:
 
 - `data.py` generates numeric Q-table labels using robust value iteration and
@@ -346,20 +346,24 @@ clearance requirements. The seed controls all sampling, and generated maps are
 distinct. Geometry, rewards, and discount are explicitly configured in each script.
 Dataset generation does not import transformer libraries.
 
-Both scripts use `R_values=(0,0.2,0.4,0.5)` and
-`C_values=(0,1,1.75,3,C_max)`, where `C_max=np.linalg.norm(mdp.bounds)`.
-Each map produces 20 samples, so a 3,000-map run produces 60,000. The finite `C_max`
-has the same Q target as infinity and uses the MDP's global-minimum shortcut. When using
-new checkpoints, supply the same finite radius for the global case at inference.
+Both scripts use `R_values=(0,0.2,0.4,0.5)`. The 2-D radii are
+`C_values=(0,0.5,0.75,1.5,2)`; the 3-D radii additionally include `C=1`.
+Each map produces 20 samples in 2-D and 24 in 3-D, so 3,000 maps produce
+60,000 and 72,000 samples, respectively.
 A progress bar counts completed Q-table samples across all maps and R/C
 combinations, showing the total, elapsed time, and estimated time remaining.
 
 `train_robot_2d_transformer.py` only loads the existing dataset and trains the model.
-Configure epochs, batch size, learning rate, and model name there. Rerunning this
+Configure training settings, including validation fraction, map splitting, token length,
+device, callbacks, and native Trainer overrides, in its main block. Rerunning this
 script reuses the dataset; it never generates maps or runs value iteration. If the
 dataset is missing, it reports the generation command. The first training run
 downloads the configured pretrained encoder/tokenizer; an existing local encoder
-directory can instead be passed as `model_name`.
+directory can instead be assigned to `model_name`.
+The 3-D training script retains its checkpoint-50640 resume configuration. For a fresh
+run, set `resume_from_checkpoint=None` and `restart_lr_schedule=False`, and select the
+desired learning rates. Its `training_options` overrides the example defaults;
+`callbacks=[]` disables its default early stopping.
 
 Data and weights go to `robot_2d/saved_results/q_transformer/`:
 
@@ -396,7 +400,7 @@ Leave `checkpoint_path=None` or omit `q_initializer` for zero initialization.
 Any callable with signature `(mdp, R_used, C_used)` can supply an alternative
 initializer, without changing the agent or importing transformer dependencies.
 
-The fixed-R/C entry point also accepts `q_initializer` and uses the same configured
+The fixed-R/C script also uses `q_initializer` and the same configured
 rewards and discount as the dataset generator and online example. Match geometry,
 action ordering, rewards, and discount in generation and deployment configurations.
 The predictor checks the Q-table shape.
