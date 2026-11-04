@@ -316,13 +316,41 @@ python -m robot_2d.generate_robot_2d_q_data
 python -m robot_2d.train_robot_2d_transformer
 ```
 
-`generate_robot_2d_q_data.py` supplies the MDP, random map generation, R/C values,
-and the template MDP. Its script generates 2,500 maps containing 20-30 obstacles,
-using the explicitly configured geometry, rewards, and discount. Each map first samples random
-start and goal cells with physical cell-center distance at least
-`start_goal_seperation=7.5`. Obstacles then retain the two-cell clearance from both
-endpoints and a nominal start-to-goal path. The seed controls endpoint and obstacle
-sampling. Dataset generation does not import transformer libraries.
+Configure the map count and R/C values in each dataset generator's main block.
+Both scripts share the map construction in `grid_q_data.py`.
+The start is fixed at cell index `(1,1)` or `(1,1,1)`. Each goal coordinate is
+sampled from `{5,6,7,8}` on the current ten-cell axes, leaving at least one cell
+between the goal and the workspace border. No minimum start-goal distance is used.
+
+Each map reserves two distinct routes, while allowing additional routes. The wide
+passage is at least two cells across in 2-D and has at least a `2x2` free-cell
+cross-section in 3-D. Sliding `2x2` squares or `2x2x2` cubes share full faces,
+preserving this width through turns. These dimensions specify total passage size,
+not a clearance radius around a centerline. Both endpoints separately retain their
+obstacle buffers of two cell widths. The second route has a one-cell-wide or
+`1x1` bottleneck between obstacle walls. No additional open region is reserved,
+and the wide route is not required to pass through the center. Map construction
+does not depend on the sampled R or C values. Geometries that cannot accommodate
+the two routes and requested obstacle count are resampled.
+Every nonterminal free cell must have a path to both the start and the goal.
+Disconnected free regions are rejected. The connectivity check treats the goal
+as an endpoint, so reaching the start never requires passing through the goal.
+The straight segment connecting the start and goal cell centers must hit at least
+two distinct obstacle cells. Intersections are counted along the complete segment,
+including contact with obstacle faces, edges, and corners. Each cell is counted once.
+
+Obstacles are sampled outside the protected cells. The requested count ranges
+are 25-40 in 2-D and 300-400 in 3-D; each map samples only counts that fit its
+remaining cells. An infeasible minimum raises an error rather than weakening the
+clearance requirements. The seed controls all sampling, and generated maps are
+distinct. Geometry, rewards, and discount are explicitly configured in each script.
+Dataset generation does not import transformer libraries.
+
+Both scripts use `R_values=(0,0.2,0.4,0.5)` and
+`C_values=(0,1,1.75,3,C_max)`, where `C_max=np.linalg.norm(mdp.bounds)`.
+Each map produces 20 samples, so a 3,000-map run produces 60,000. The finite `C_max`
+has the same Q target as infinity and uses the MDP's global-minimum shortcut. When using
+new checkpoints, supply the same finite radius for the global case at inference.
 A progress bar counts completed Q-table samples across all maps and R/C
 combinations, showing the total, elapsed time, and estimated time remaining.
 
@@ -336,10 +364,12 @@ directory can instead be passed as `model_name`.
 Data and weights go to `robot_2d/saved_results/q_transformer/`:
 
 ```text
-q_data.npz              # Numeric Q labels, R/C, unique map descriptions, and residuals
+q_data_2d.npz           # Numeric Q labels, R/C, unique map descriptions, and residuals
 checkpoint/            # Final model.pt plus its encoder config and tokenizer
 checkpoint/checkpoint-*/ # Per-epoch models, optimizer/scheduler state, and Trainer state
 ```
+
+The 3-D dataset is `robot_3d/saved_results/q_transformer/q_data_3d.npz`.
 
 `Tabular_Agent.value_iteration()` uses the same robust target and MDP uncertainty
 set as Q-learning. Each iteration reads a frozen previous value function, uses no

@@ -247,7 +247,7 @@ class Robot2DMotionMDP(gym.Env):
 
     def worst_case_value(self, nominal_next_state, C, values):
         """Evaluate the local minimum; infinitely many outside terminal values are zero."""
-        if np.isposinf(C):
+        if C >= np.linalg.norm(self.bounds):
             return min(0.0, float(np.min(self.values_at(self.states, values))))
         states = self.localized_uncertainty_states(nominal_next_state, C)
         return float(np.min(self.values_at(states, values)))

@@ -96,10 +96,16 @@ class TransformerTests(unittest.TestCase):
                 start_cell=(0, 0, 0), goal_cell=(1, 1, 1), gamma=0.9,
                 movement_reward=0, goal_reward=1,
             )
-            maps = list(training_maps(template, 4, n_obstacles=(0, 0), start_goal_seperation=1))
+            maps = []
+            for goal in ((1, 1, 1), (0, 1, 1), (1, 0, 1), (1, 1, 0)):
+                sample = template.clone(nominal=True)
+                sample.goal_state = goal
+                sample.set_obstacles([])
+                sample.reset()
+                maps.append(sample)
             output = directory / "saved_results/q_transformer"
             output.mkdir(parents=True)
-            dataset = output / "q_data.npz"
+            dataset = output / "q_data_3d.npz"
             generate_q_data(maps, (0, 0.3), (0, 0.6), dataset)
             script = str(directory / "train.py")
             with (
@@ -133,7 +139,7 @@ class TransformerTests(unittest.TestCase):
                 start_cell=(0, 0, 0), goal_cell=(9, 9, 9), gamma=0.9,
                 movement_reward=0, goal_reward=1,
             )
-            full_mdp = next(training_maps(full_mdp, 2, n_obstacles=(400, 400), seed=7))
+            full_mdp = next(training_maps(full_mdp, 2, n_obstacles=(250, 350), seed=7))
             full_checkpoint = directory / "full_shape"
             full_encoder = BertModel(config)
             extend_bert_positions(full_encoder, 1536)

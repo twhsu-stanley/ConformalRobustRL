@@ -22,7 +22,7 @@ class TransformerIntegrationTests(unittest.TestCase):
             movement_reward=0.0, goal_reward=1.0,
         )
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "q_data.npz"
+            path = Path(directory) / "q_data_2d.npz"
             generate_q_data([template.clone(nominal=True)], (0,), (0,), path)
             with np.load(path, allow_pickle=False) as data:
                 Q = data["Q"][0]
@@ -49,7 +49,7 @@ class TransformerIntegrationTests(unittest.TestCase):
         updated_description = mdp.q_transformer_context()
         self.assertNotEqual(updated_description, moved_start)
 
-    def test_training_maps_keep_template_unchanged_and_randomize_endpoints(self):
+    def test_training_maps_keep_template_unchanged_and_fix_the_start(self):
         template = Robot2DMotionMDP(
             x_max=10, y_max=10, grid_shape=(10, 10), start_cell=(1, 1), goal_cell=(7, 6), gamma=0.9,
             movement_reward=0.0, goal_reward=1.0,
@@ -63,9 +63,8 @@ class TransformerIntegrationTests(unittest.TestCase):
             np.testing.assert_array_equal(mdp.state_coordinates, template.state_coordinates)
             self.assertTrue(mdp.is_nominal)
             self.assertTrue(10 <= np.count_nonzero(mdp.obstacle_mask) <= 30)
-            distance = np.linalg.norm(mdp.coordinates(mdp.start_state) -
-                                      mdp.coordinates(mdp.goal_state))
-            self.assertGreaterEqual(distance, 7.5)
+            self.assertEqual(mdp.start_state, (1, 1))
+            self.assertTrue(all(5 <= coordinate <= 8 for coordinate in mdp.goal_state))
             self.assertEqual(mdp.s, mdp.start_state)
             np.testing.assert_array_equal(mdp.position, mdp.coordinates(mdp.start_state))
             self.assertFalse(mdp.is_terminal(mdp.start_state))
@@ -93,24 +92,21 @@ class TransformerIntegrationTests(unittest.TestCase):
         self.assertIn("Start at (0, 0) and move to the goal state at (2, 1)", prompt)
         self.assertIn("Predict the Q-table for R = 0.3 and C = infinity.", prompt)
 
-    def test_random_endpoints_use_physical_distance_and_repeat_with_the_seed(self):
+    def test_random_goals_use_the_opposite_interior_half_and_repeat_with_the_seed(self):
         mdp = Robot2DMotionMDP(
-            x_max=6, y_max=3, grid_shape=(3, 3), start_cell=(0, 0), goal_cell=(2, 2), gamma=0.9,
+            x_max=10, y_max=10, grid_shape=(10, 10), start_cell=(0, 0), goal_cell=(9, 9), gamma=0.9,
             movement_reward=0.0, goal_reward=1.0, obstacles=[],
         )
         first_rng, second_rng = np.random.default_rng(7), np.random.default_rng(7)
-        for _ in range(20):
-            start, goal = randomize_start_goal(mdp, first_rng, start_goal_seperation=4.25)
-            self.assertEqual((start, goal), randomize_start_goal(mdp, second_rng, 4.25))
-            self.assertGreaterEqual(np.linalg.norm(mdp.coordinates(start) -
-                                                  mdp.coordinates(goal)), 4.25)
-            self.assertLess(np.linalg.norm(np.asarray(start) - goal), 4.25)
-        start, goal = randomize_start_goal(mdp, first_rng, start_goal_seperation=0)
-        self.assertNotEqual(start, goal)
-        for invalid in (-1, np.nan, np.inf, 5):
-            with self.subTest(separation=invalid):
-                with self.assertRaisesRegex(ValueError, "start_goal_seperation"):
-                    randomize_start_goal(mdp, first_rng, invalid)
+        goals = set()
+        for _ in range(100):
+            start, goal = randomize_start_goal(mdp, first_rng)
+            self.assertEqual((start, goal), randomize_start_goal(mdp, second_rng))
+            self.assertEqual(start, (1, 1))
+            self.assertTrue(all(5 <= coordinate <= 8 for coordinate in goal))
+            goals.add(goal)
+        self.assertEqual(len(goals), 16)
+        self.assertIn((5, 5), goals)
 
     def test_online_and_fixed_runs_accept_initializers_without_serializing_them(self):
         calls = []

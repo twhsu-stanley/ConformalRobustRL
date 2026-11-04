@@ -12,7 +12,7 @@ def main(
     model_name="bert-base-uncased",
 ):
     output_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
-    dataset_path = output_dir / "q_data.npz"
+    dataset_path = output_dir / "q_data_2d.npz"
     if not dataset_path.is_file():
         raise FileNotFoundError(
             f"Dataset not found: {dataset_path}. "

@@ -19,7 +19,7 @@ def main(
     if not isinstance(max_length, (int, np.integer)) or max_length < 1:
         raise ValueError("max_length must be a positive integer.")
     output_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
-    dataset_path = output_dir / "q_data.npz"
+    dataset_path = output_dir / "q_data_3d.npz"
     if not dataset_path.is_file():
         raise FileNotFoundError(
             f"Dataset not found: {dataset_path}. "

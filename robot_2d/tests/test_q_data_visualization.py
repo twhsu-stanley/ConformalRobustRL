@@ -54,7 +54,7 @@ class DatasetVisualizationTests(unittest.TestCase):
             data_dir.mkdir(parents=True)
             first, _ = Tabular_Agent(self.mdp, 0.5).value_iteration(R=0, C=0)
             last, _ = Tabular_Agent(self.mdp, 0.5).value_iteration(R=0.5, C=np.inf)
-            filename = data_dir / "q_data.npz"
+            filename = data_dir / "q_data_2d.npz"
             np.savez_compressed(
                 filename, descriptions=[self.mdp.q_transformer_context()], map_index=[0, 0],
                 R=[0, 0.5], C=[0, np.inf], Q=[first, last],
@@ -82,10 +82,7 @@ class DatasetVisualizationTests(unittest.TestCase):
                 for invalid in (0, -1, 3, 1.5):
                     with self.assertRaisesRegex(ValueError, "integer from 1 to 2"):
                         main(invalid, show=False)
-                filename.rename(data_dir / "q_data_grid.npz")
-                fig = main(2, show=False)
-                self.addCleanup(plt.close, fig)
-            self.assertEqual([path.name for path in data_dir.iterdir()], ["q_data_grid.npz"])
+            self.assertEqual([path.name for path in data_dir.iterdir()], ["q_data_2d.npz"])
 
 
 if __name__ == "__main__":

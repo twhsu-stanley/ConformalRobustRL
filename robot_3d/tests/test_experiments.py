@@ -39,21 +39,20 @@ def small_runner_mdp(**settings):
 
 
 class DatasetTests(unittest.TestCase):
-    def test_random_maps_have_ten_unit_endpoint_separation_and_complete_grid_prompts(self):
+    def test_structured_maps_have_fixed_starts_interior_goals_and_complete_grid_prompts(self):
         template = Robot3DMotionMDP(
             x_max=10, y_max=10, z_max=10, grid_shape=(10, 10, 10),
             start_cell=(0, 0, 0), goal_cell=(9, 9, 9), gamma=0.9,
             movement_reward=0, goal_reward=1,
         )
-        first = training_maps(template, 3, seed=7)
-        second = training_maps(template, 3, seed=7)
+        first = training_maps(template, 3, n_obstacles=(250, 350), seed=7)
+        second = training_maps(template, 3, n_obstacles=(250, 350), seed=7)
         for mdp, repeated in zip(first, second):
             self.assertEqual(mdp.start_state, repeated.start_state)
             self.assertEqual(mdp.goal_state, repeated.goal_state)
             np.testing.assert_array_equal(mdp.obstacle_mask, repeated.obstacle_mask)
-            distance = np.linalg.norm(mdp.coordinates(mdp.start_state) -
-                                      mdp.coordinates(mdp.goal_state))
-            self.assertGreaterEqual(distance, 10.0)
+            self.assertEqual(mdp.start_state, (1, 1, 1))
+            self.assertTrue(all(5 <= coordinate <= 8 for coordinate in mdp.goal_state))
             self.assertTrue(250 <= mdp.obstacle_mask.sum() <= 350)
             context = mdp.q_transformer_context()
             grid = context.split("0 = free space, 1 = obstacle.\n\n")[1].split("\nStart at ")[0]
@@ -70,9 +69,9 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(mdp.gamma, 0.9)
         self.assertFalse(template.obstacle_mask.any())
         self.assertEqual(template.start_state, (0, 0, 0))
-        for invalid in (-1, np.inf, 100):
-            with self.assertRaises(ValueError):
-                randomize_start_goal(template, np.random.default_rng(7), invalid)
+        start, goal = randomize_start_goal(template, np.random.default_rng(7))
+        self.assertEqual(start, (1, 1, 1))
+        self.assertTrue(all(5 <= coordinate <= 8 for coordinate in goal))
 
     def test_generator_saves_numeric_labels_from_the_full_mdp(self):
         mdp = Robot3DMotionMDP(
@@ -80,12 +79,21 @@ class DatasetTests(unittest.TestCase):
             start_cell=(0, 0, 0), goal_cell=(1, 1, 1), gamma=0.73,
             movement_reward=0, goal_reward=1,
         )
+        maps = []
+        for goal in ((1, 1, 1), (0, 1, 1), (1, 0, 1), (1, 1, 0)):
+            sample = mdp.clone(nominal=True)
+            sample.goal_state = goal
+            sample.set_obstacles([])
+            sample.reset()
+            maps.append(sample)
         with tempfile.TemporaryDirectory() as directory:
             script = str(Path(directory) / "main.py")
-            with patch("robot_3d.generate_robot_3d_q_data.__file__", script):
+            with (
+                patch("robot_3d.generate_robot_3d_q_data.__file__", script),
+                patch("robot_3d.generate_robot_3d_q_data.training_maps", return_value=maps),
+            ):
                 path = generate_data(
-                    mdp, n_maps=4, n_obstacles=(0, 0), start_goal_seperation=1,
-                    R_values=(0, 0.3), C_values=(0, 0.6), seed=7,
+                    mdp, n_maps=4, R_values=(0, 0.3), C_values=(0, 0.6), n_obstacles=(0, 0), seed=7,
                 )
             with np.load(path, allow_pickle=False) as data:
                 self.assertEqual(data["Q"].shape, (16, 8, 6))

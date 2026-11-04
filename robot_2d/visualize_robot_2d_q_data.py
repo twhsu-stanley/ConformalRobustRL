@@ -69,9 +69,7 @@ def _nominal_policy_trajectory(mdp, Q):
 def main(index=1, *, show=True):
     """Display data point index (one-based: 1 through N); return the unsaved figure."""
     data_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
-    dataset_path = data_dir / "q_data.npz"
-    if not dataset_path.is_file():
-        dataset_path = data_dir / "q_data_grid.npz"
+    dataset_path = data_dir / "q_data_2d.npz"
     with np.load(dataset_path, allow_pickle=False) as data:
         n_datapoints = len(data["map_index"])
         if not isinstance(index, (int, np.integer)) or not 1 <= index <= n_datapoints:
@@ -94,4 +92,4 @@ def main(index=1, *, show=True):
 
 
 if __name__ == "__main__":
-    main(index=120)
+    main(index=49)
