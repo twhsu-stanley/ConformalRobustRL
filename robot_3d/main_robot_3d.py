@@ -25,8 +25,8 @@ if __name__ == "__main__":
     checkpoint_path = None  # Use saved_results/q_transformer/checkpoint after 3-D training.
     q_initializer = None
     if checkpoint_path is not None:
-        from robot_3d.transformer import QTransformerPredictor
-        q_initializer = QTransformerPredictor(checkpoint_path)
+        from q_transformer.model import QTransformerPredictor
+        q_initializer = QTransformerPredictor(checkpoint_path, truncation=False)
 
     experiments = (
         (0.0, 1.0, q_initializer, n_trials),

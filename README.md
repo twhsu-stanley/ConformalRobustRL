@@ -52,6 +52,8 @@ General statistics and plots (`plot_R`, `plot_acp`, `plot_performance`, and
 geometry, disturbances, and trajectory plots live in `robot_2d/utils_2d.py` and
 `robot_3d/utils_3d.py`. Each example owns its support schedule through
 `C_star_shift_2d` or `C_star_shift_3d`; their current numerical schedules are unchanged.
+Both robot MDPs inherit common nominal transitions, rewards, reset, collision traversal,
+and deployment bookkeeping from `grid_robot_mdp.py`. Geometry and noise remain in each example.
 
 Every `Robot2DMotionMDP` construction must explicitly specify `x_max`, `y_max`,
 `grid_shape`, `start_cell`, `goal_cell`, `gamma`, `movement_reward`, and
@@ -304,6 +306,8 @@ across examples in `q_transformer/`; it contains no robot or 2-D imports:
   all R/C variants of a map together in either training or validation.
 - `model.py` implements the supplied encoder/mean-pooling/regression architecture
   and frozen checkpoint inference. R and C condition the input; only Q is predicted.
+  It also provides BERT position extension and the shared prompt tokenizer. The 3-D
+  scripts use `truncation=False` to reject overlong inputs; the 2-D truncation policy is unchanged.
 - `train.py` fine-tunes the encoder and Q head with Huber loss and AdamW.
   Both examples use a 100-epoch limit, weight decay 0.01, gradient clipping at 1.0,
   one batch per optimizer update, and linear learning-rate decay with 5% warmup.

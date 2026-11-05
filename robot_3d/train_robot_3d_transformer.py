@@ -32,28 +32,19 @@ if __name__ == "__main__":
     resume_from_checkpoint = checkpoint_path / "checkpoint-50640"
     restart_lr_schedule = True
 
-    if not isinstance(max_length, (int, np.integer)) or max_length < 1:
-        raise ValueError("max_length must be a positive integer.")
     if not dataset_path.is_file():
         raise FileNotFoundError(
             f"Dataset not found: {dataset_path}. "
             "Run python -m robot_3d.generate_robot_3d_q_data first."
         )
     import torch
-    from transformers import AutoTokenizer, EarlyStoppingCallback
+    from transformers import EarlyStoppingCallback
 
-    from q_transformer.data import format_prompt
+    from q_transformer.model import extend_bert_positions
     from q_transformer.train import train_q_transformer
-    from robot_3d.transformer import extend_bert_positions, validate_prompt_length
 
-    tokenizer = AutoTokenizer.from_pretrained(resume_from_checkpoint or model_name)
     with np.load(dataset_path, allow_pickle=False) as data:
-        descriptions, indices, levels, radii = (
-            data["descriptions"], data["map_index"], data["R"], data["C"],
-        )
-        for index, R, C in zip(indices, levels, radii):
-            validate_prompt_length(tokenizer, format_prompt(descriptions[index], R, C), max_length)
-        if any("0 = free space, 1 = obstacle." not in text for text in descriptions):
+        if any("0 = free space, 1 = obstacle." not in text for text in data["descriptions"]):
             raise ValueError(
                 "The dataset must use the full-grid prompt. "
                 "Run python -m robot_3d.generate_robot_3d_q_data again."
@@ -77,7 +68,7 @@ if __name__ == "__main__":
         dataset_path, checkpoint_path, model_name=model_name,
         epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
         validation_fraction=validation_fraction, seed=seed, max_length=max_length, device=device,
-        prepare_encoder=extend_bert_positions, padding=padding,
+        prepare_encoder=extend_bert_positions, padding=padding, truncation=False,
         head_learning_rate=head_learning_rate, position_learning_rate=position_learning_rate,
         split_by_map=split_by_map, callbacks=callbacks, training_options=training_options,
         resume_from_checkpoint=resume_from_checkpoint, restart_lr_schedule=restart_lr_schedule,

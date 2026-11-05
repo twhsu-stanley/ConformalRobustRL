@@ -28,7 +28,7 @@ class TransformerTests(unittest.TestCase):
         import torch
         from transformers import BertConfig, BertModel
 
-        from robot_3d.transformer import extend_bert_positions
+        from q_transformer.model import extend_bert_positions
 
         previous_threads = torch.get_num_threads()
         torch.set_num_threads(1)
@@ -71,8 +71,8 @@ class TransformerTests(unittest.TestCase):
         import torch
         from transformers import BertConfig, BertModel, BertTokenizerFast
 
-        from q_transformer.model import QValueTransformer
-        from robot_3d.transformer import QTransformerPredictor, extend_bert_positions
+        from q_transformer.model import QTransformerPredictor, QValueTransformer
+        from q_transformer.model import extend_bert_positions
 
         previous_threads = torch.get_num_threads()
         torch.set_num_threads(1)
@@ -121,11 +121,14 @@ class TransformerTests(unittest.TestCase):
                 )
             self.assertTrue(np.isfinite(history[-1]["train_loss"]))
             self.assertFalse(list(output.glob("bert_*")))
-            predictor = QTransformerPredictor(output / "checkpoint", device="cpu")
+            predictor = QTransformerPredictor(output / "checkpoint", device="cpu", truncation=False)
             self.assertEqual(predictor.max_length, 1536)
             self.assertEqual(predictor.tokenizer.model_max_length, 1536)
             self.assertEqual(predictor.model.encoder.config.max_position_embeddings, 1536)
-            initial = predictor(template, 0.3, 0.6)
+            with patch.object(template, "q_transformer_context",
+                              wraps=template.q_transformer_context) as context:
+                initial = predictor(template, 0.3, 0.6)
+            context.assert_called_once_with()
             self.assertEqual(initial.shape, (8, 6))
             np.testing.assert_array_equal(initial[template.terminal_mask], 0)
             agent = Tabular_Agent(template, lr_init=0.5, R=0.3, C=0.6, seed=7)
@@ -134,7 +137,7 @@ class TransformerTests(unittest.TestCase):
             self.assertTrue(agent.training_diagnostics["converged"])
             self.assertEqual(agent.evaluation_return[0], initial[0].max())
             with patch.object(template, "q_transformer_context", return_value="free " * 2000):
-                with self.assertRaisesRegex(ValueError, "complete 3-D prompt needs"):
+                with self.assertRaisesRegex(ValueError, "complete prompt exceeds"):
                     predictor(template, 0.3, 0.6)
 
             full_mdp = Robot3DMotionMDP(
@@ -150,7 +153,7 @@ class TransformerTests(unittest.TestCase):
             QValueTransformer(full_encoder, 1000, 6).save_checkpoint(
                 full_checkpoint, tokenizer, 1536, {},
             )
-            full_predictor = QTransformerPredictor(full_checkpoint, device="cpu")
+            full_predictor = QTransformerPredictor(full_checkpoint, device="cpu", truncation=False)
             prompt = format_prompt(full_mdp.q_transformer_context(), 0.2, 1.75)
             self.assertTrue(1000 < len(tokenizer(prompt)["input_ids"]) < 1536)
             full_Q = full_predictor(full_mdp, 0.12345678901234566, 1.2345678901234567)
@@ -169,7 +172,9 @@ class TransformerTests(unittest.TestCase):
                     restart_lr_schedule=True,
                 )
             self.assertEqual(continued_history[-1]["epoch"], 3)
-            continued = QTransformerPredictor(output / "checkpoint/checkpoint-9", device="cpu")
+            continued = QTransformerPredictor(
+                output / "checkpoint/checkpoint-9", device="cpu", truncation=False,
+            )
             self.assertEqual(continued.model.encoder.config.max_position_embeddings, 1536)
             self.assertTrue(np.all(np.isfinite(continued(template, 0.3, 0.6))))
             schedule = torch.load(
@@ -179,15 +184,19 @@ class TransformerTests(unittest.TestCase):
             self.assertEqual(schedule["num_training_steps"], 3)
 
             np.savez_compressed(
-                dataset, descriptions=np.array(["free " * 600]), map_index=np.array([0, 0]),
+                dataset, descriptions=np.array(["0 = free space, 1 = obstacle. " * 100] * 2),
+                map_index=np.array([0, 1]),
                 R=np.array([0, 0.3]), C=np.array([0, 0.6]), Q=np.zeros((2, 8, 6)),
             )
             with (
                 patch("robot_3d.train_robot_3d_transformer.__file__", script),
-                patch("q_transformer.train.train_q_transformer", side_effect=AssertionError),
+                patch("q_transformer.train._QTrainer", side_effect=AssertionError),
             ):
-                with self.assertRaisesRegex(ValueError, "complete 3-D prompt needs"):
-                    train_transformer(model_name=str(encoder_path), max_length=256)
+                for padding in ("max_length", "longest"):
+                    with self.subTest(padding=padding):
+                        with self.assertRaisesRegex(ValueError, "complete prompt exceeds"):
+                            train_transformer(model_name=str(encoder_path), max_length=256,
+                                              padding=padding)
 
             np.savez_compressed(
                 dataset, descriptions=np.array(["Obstacle cells are at coordinates (x, y, z):"]),

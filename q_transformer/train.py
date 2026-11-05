@@ -156,7 +156,7 @@ def train_q_transformer(
     epochs=100, batch_size=4, learning_rate=1e-5, validation_fraction=0.1, seed=42,
     max_length=512, device=None,
     training_options=None, head_learning_rate=None, position_learning_rate=None,
-    split_by_map=False, prepare_encoder=None, padding="max_length", callbacks=None,
+    split_by_map=False, prepare_encoder=None, padding="max_length", truncation=None, callbacks=None,
     resume_from_checkpoint=None, restart_lr_schedule=False,
 ):
     """Fine-tune the encoder and regression head using Huber loss on numeric targets.
@@ -166,6 +166,7 @@ def train_q_transformer(
     CUDA training uses FP16; unavailable CUDA falls back to CPU with FP32.
     training_options overrides native TrainingArguments. Other optional settings
     enable held-out maps, encoder preparation, and module-specific learning rates.
+    truncation=None keeps the padding-dependent policy; False always rejects overlong prompts.
     The defaults preserve the original training behavior.
     epochs is the total limit, including epochs already completed in a checkpoint.
     Restarting the linear schedule applies the supplied rates to the remaining steps.
@@ -227,16 +228,10 @@ def train_q_transformer(
         tokenizer.model_max_length = max_length
     max_length = min(max_length, encoder.config.max_position_embeddings, tokenizer.model_max_length)
     tokenizer.model_max_length = int(max_length)
-    if padding == "max_length":
-        encoded = tokenize_prompts(tokenizer, prompts, max_length)
-    else:
-        encoded = tokenizer(
-            prompts, padding=True, truncation=False, return_tensors="pt",
-            return_token_type_ids=False, verbose=False,
-            pad_to_multiple_of=8 if max_length % 8 == 0 else None,
-        )
-        if encoded["input_ids"].shape[1] > max_length:
-            raise ValueError("A complete prompt exceeds the encoder's token limit.")
+    truncation = padding == "max_length" if truncation is None else truncation
+    encoded = tokenize_prompts(
+        tokenizer, prompts, max_length, padding=padding, truncation=truncation,
+    )
     dataset = [
         {"input_ids": encoded["input_ids"][i], "attention_mask": encoded["attention_mask"][i],
          "labels": torch.from_numpy(targets[i])}

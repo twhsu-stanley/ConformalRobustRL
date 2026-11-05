@@ -196,6 +196,8 @@ class TransformerModelTests(unittest.TestCase):
             self.assertEqual(tuple(encoded["input_ids"].shape), (2, 64))
             self.assertEqual(encoded["attention_mask"][1].sum(), 64)
             self.assertLess(encoded["attention_mask"][0].sum(), 64)
+            with self.assertRaisesRegex(ValueError, "complete prompt exceeds"):
+                tokenize_prompts(tokenizer, ["free", "free " * 100], 64, truncation=False)
 
 
 if __name__ == "__main__":

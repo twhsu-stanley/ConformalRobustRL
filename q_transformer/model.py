@@ -10,12 +10,41 @@ from transformers import AutoConfig, AutoModel, AutoTokenizer
 from q_transformer.data import format_prompt
 
 
-def tokenize_prompts(tokenizer, prompts, max_length):
-    """Use the original fixed-length padding and truncation for training and inference."""
-    encoded = tokenizer(
-        prompts, padding="max_length", truncation=True, max_length=max_length, return_tensors="pt",
+def extend_bert_positions(encoder, max_length):
+    """Keep all pretrained weights; initialize only the additional position vectors."""
+    if encoder.config.model_type != "bert" or encoder.config.position_embedding_type != "absolute":
+        raise ValueError("Extending the context requires BERT with absolute positional embeddings.")
+    embeddings = encoder.embeddings
+    original = embeddings.position_embeddings
+    if max_length <= original.num_embeddings:
+        return
+    expanded = nn.Embedding(
+        max_length, original.embedding_dim, device=original.weight.device,
+        dtype=original.weight.dtype,
     )
-    return {key: encoded[key] for key in ("input_ids", "attention_mask")}
+    with torch.no_grad():
+        expanded.weight.normal_(mean=0, std=encoder.config.initializer_range)
+        expanded.weight[:original.num_embeddings].copy_(original.weight)
+    expanded.weight.requires_grad_(original.weight.requires_grad)
+    embeddings.position_embeddings = expanded
+    position_ids = torch.arange(max_length, device=original.weight.device).expand((1, -1))
+    embeddings.register_buffer("position_ids", position_ids, persistent=False)
+    embeddings.register_buffer("token_type_ids", torch.zeros_like(position_ids), persistent=False)
+    encoder.config.max_position_embeddings = max_length
+
+
+def tokenize_prompts(tokenizer, prompts, max_length, *, padding="max_length", truncation=True):
+    """Tokenize once, preserving the requested padding and truncation policy."""
+    options = {"max_length": max_length} if padding == "max_length" or truncation else {}
+    if padding == "longest":
+        options["pad_to_multiple_of"] = 8 if max_length % 8 == 0 else None
+    encoded = tokenizer(
+        prompts, padding=padding, truncation=truncation, return_token_type_ids=False,
+        verbose=False, **options,
+    )
+    if any(len(ids) > max_length for ids in encoded["input_ids"]):
+        raise ValueError("A complete prompt exceeds the encoder's token limit.")
+    return {key: torch.tensor(encoded[key]) for key in ("input_ids", "attention_mask")}
 
 
 class QValueTransformer(nn.Module):
@@ -52,10 +81,11 @@ class QValueTransformer(nn.Module):
 
 
 class QTransformerPredictor:
-    """Load once, then call predictor(mdp, R_used, C_used) before Algorithm 1."""
+    """Load once and predict before Algorithm 1; truncation=False rejects overlong inputs."""
 
-    def __init__(self, checkpoint_path, *, device=None):
+    def __init__(self, checkpoint_path, *, device=None, truncation=True):
         path = Path(checkpoint_path)
+        self.truncation = truncation
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         checkpoint = torch.load(path / "model.pt", map_location="cpu", weights_only=True)
         self.max_length = checkpoint["max_length"]
@@ -71,11 +101,13 @@ class QTransformerPredictor:
         if (len(base.states), mdp.action_space.n) != (self.model.n_states, self.model.n_actions):
             raise ValueError("The checkpoint Q-table shape does not match the MDP.")
         prompt = format_prompt(base.q_transformer_context(), R_used, C_used)
-        encoded = tokenize_prompts(self.tokenizer, [prompt], self.max_length)
+        encoded = tokenize_prompts(
+            self.tokenizer, [prompt], self.max_length, truncation=self.truncation,
+        )
         encoded = {key: value.to(self.device) for key, value in encoded.items()}
         with torch.inference_mode():
             Q = self.model(**encoded)[0].cpu().numpy().astype(float)
         if not np.all(np.isfinite(Q)):
             raise ValueError("The transformer predicted a nonfinite Q-table.")
-        Q[mdp.unwrapped.terminal_mask] = 0.0
+        Q[base.terminal_mask] = 0.0
         return Q
