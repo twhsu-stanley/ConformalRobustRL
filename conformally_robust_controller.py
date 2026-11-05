@@ -86,9 +86,10 @@ class ConformallyRobustController:
                 "quantile_max": quantile_max,
             }
             # Validate calibration settings before any potentially expensive pilot run.
-            validated = ACP([0.0], **self.acp_options)
+            scores = [0.0] if calibration_scores is None else calibration_scores
+            validated = ACP(scores, **self.acp_options)
             if calibration_scores is not None:
-                self.acp = ACP(calibration_scores, **self.acp_options)
+                self.acp = validated
                 self.initial_calibration_scores = list(self.acp.scores)
             elif self.pilot_episodes == 0:
                 raise ValueError("Provide calibration_scores or set pilot_episodes > 0.")
@@ -116,9 +117,7 @@ class ConformallyRobustController:
         """Train and deploy once, then update uncertainty from this episode only."""
         if self.fixed_C is None:
             self.initialize_calibration()
-        settings = {}
-        if self.episode_setup is not None:
-            settings = self.episode_setup(self, len(self.history))
+        settings = {} if self.episode_setup is None else self.episode_setup(self, len(self.history))
         R_used = self.R_hat if self.fixed_R is None else self.fixed_R
         C_used = self.acp.quantile() if self.fixed_C is None else self.fixed_C
         Tabular_Agent._validate_uncertainty(R_used, C_used)

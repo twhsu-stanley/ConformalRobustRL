@@ -19,12 +19,10 @@ if __name__ == "__main__":
     seed = 42
     max_length = 512
     device = None
-    training_options = None
     head_learning_rate = None
     position_learning_rate = None
     split_by_map = True
     padding = "max_length"
-    callbacks = None
     gradient_accumulation_steps = 1
     warmup_ratio = 0.05
     patience = 5
@@ -41,7 +39,7 @@ if __name__ == "__main__":
 
     from q_transformer.train import train_q_transformer
 
-    options = {
+    training_options = {
         "gradient_accumulation_steps": gradient_accumulation_steps,
         "warmup_ratio": warmup_ratio,
         "eval_strategy": "epoch", "save_total_limit": 5,
@@ -52,16 +50,14 @@ if __name__ == "__main__":
         "tf32": True if torch.cuda.is_available()
                 and torch.cuda.get_device_capability()[0] >= 8 else None,
     }
-    options.update(training_options or {})
-    if callbacks is None:
-        callbacks = [EarlyStoppingCallback(early_stopping_patience=patience,
-                                           early_stopping_threshold=1e-5)]
+    callbacks = [EarlyStoppingCallback(early_stopping_patience=patience,
+                                       early_stopping_threshold=1e-5)]
 
     history = train_q_transformer(
         dataset_path, checkpoint_path, model_name=model_name,
         epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
         validation_fraction=validation_fraction, seed=seed, max_length=max_length, device=device,
-        training_options=options,
+        training_options=training_options,
         head_learning_rate=head_learning_rate, position_learning_rate=position_learning_rate,
         split_by_map=split_by_map, padding=padding, callbacks=callbacks,
         resume_from_checkpoint=resume_from_checkpoint, restart_lr_schedule=restart_lr_schedule,

@@ -149,7 +149,7 @@ class Robot3DMotionMDP(gym.Env):
             selected = states[inside]
             rows = selected[:, 0] + self.nx * (selected[:, 1] + self.ny * selected[:, 2])
             result[inside] = np.where(self.terminal_mask[rows], 0.0, values[rows])
-        return float(result) if result.ndim == 0 else result
+        return result
 
     def _validate_path(self):
         queue = deque([self.start_state])
