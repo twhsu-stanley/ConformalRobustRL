@@ -78,3 +78,5 @@ if __name__ == "__main__":
         split_by_map=split_by_map, callbacks=callbacks, training_options=training_options,
         resume_from_checkpoint=resume_from_checkpoint, restart_lr_schedule=restart_lr_schedule,
     )
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
