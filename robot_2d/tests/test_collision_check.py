@@ -8,7 +8,7 @@ import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from utils_tabular import plot_acp, plot_conformal_history
+from utils import plot_acp, plot_conformal_history
 
 
 class SegmentCollisionTests(unittest.TestCase):

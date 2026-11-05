@@ -8,7 +8,7 @@ import numpy as np
 
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
-from utils_tabular import calc_evaluation_return_mean_std
+from utils import calc_evaluation_return_mean_std
 
 
 def reference_q(mdp, R, C):

@@ -19,7 +19,7 @@ import numpy as np
 from q_transformer.data import format_prompt
 from grid_q_data import randomize_start_goal, training_maps
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
-from robot_3d.plot_online_comparison_3d import plot_comparison
+from robot_3d.plot_robot_3d_online_comparison import plot_comparison
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 from robot_3d.utils_3d import plot_robot_map, plot_robot_motion
 from tests.script_runner import script_entrypoint

@@ -13,7 +13,7 @@ if not __package__:
 
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
 from robot_3d.utils_3d import plot_trajectories
-from utils_tabular import plot_R, plot_acp, plot_performance
+from utils import plot_R, plot_acp, plot_performance
 
 
 plt.rcParams.update({

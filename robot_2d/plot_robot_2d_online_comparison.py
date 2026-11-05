@@ -13,7 +13,7 @@ if not __package__:
 
 from robot_2d.main_robot_2d_online import METHOD_SETTINGS
 from robot_2d.utils_2d import mismatch_probabilities, plot_trajectories
-from utils_tabular import plot_R, plot_acp, plot_performance
+from utils import plot_R, plot_acp, plot_performance
 
 
 plt.rcParams.update({

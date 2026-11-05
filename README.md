@@ -48,7 +48,7 @@ The R-contamination baselines use prescribed R values as in Wang and Zou.
 When both R and C are fixed, the controller trains once and reuses the policy.
 Otherwise it recomputes the policy each deployment episode.
 General statistics and plots (`plot_R`, `plot_acp`, `plot_performance`, and
-`plot_conformal_history`) are shared in `utils_tabular.py`. Example-specific
+`plot_conformal_history`) are shared in `utils.py`. Example-specific
 geometry, disturbances, and trajectory plots live in `robot_2d/utils_2d.py` and
 `robot_3d/utils_3d.py`. Each example owns its support schedule through
 `C_star_shift_2d` or `C_star_shift_3d`; their current numerical schedules are unchanged.

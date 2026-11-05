@@ -128,7 +128,7 @@ if __name__ == "__main__":
                 import matplotlib
                 matplotlib.use("Agg")
                 from robot_2d.utils_2d import plot_robot_motion
-                from utils_tabular import plot_conformal_history
+                from utils import plot_conformal_history
                 import matplotlib.pyplot as plt
                 if controller.fixed_R is None or controller.acp is not None:
                     fig = plot_conformal_history(controller.history, controller.delta)
