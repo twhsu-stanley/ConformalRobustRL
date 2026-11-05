@@ -28,9 +28,14 @@ if __name__ == "__main__":
     gradient_accumulation_steps = 1
     warmup_ratio = 0.05
     patience = 5
-    # For a fresh run, use resume_from_checkpoint=None and restart_lr_schedule=False.
-    resume_from_checkpoint = checkpoint_path / "checkpoint-50640"
-    restart_lr_schedule = True
+
+    # For resuming from a checkpoint, set resume_from_checkpoint to the path of the checkpoint file and restart_lr_schedule to True.
+    #resume_from_checkpoint = checkpoint_path / "checkpoint-50640"
+    #restart_lr_schedule = True
+    #
+    # For a fresh run, use resume_from_checkpoint=None and restart_lr_schedule=False. 
+    resume_from_checkpoint = None
+    restart_lr_schedule = False
 
     if not dataset_path.is_file():
         raise FileNotFoundError(

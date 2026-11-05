@@ -30,7 +30,7 @@ plt.rcParams.update({
 METHOD_LABELS = {method: settings[2] for method, settings in METHOD_SETTINGS.items()}
 
 
-def plot_comparison():
+if __name__ == "__main__":
     """Read saved runs and plot R, ACP, performance, and all deployment trajectories."""
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     runs = []
@@ -60,7 +60,3 @@ def plot_comparison():
                 f"_trial_{run['trial']}")
         fig.savefig(output_dir / f"{name}.png", dpi=180)
         plt.close(fig)
-
-
-if __name__ == "__main__":
-    plot_comparison()
