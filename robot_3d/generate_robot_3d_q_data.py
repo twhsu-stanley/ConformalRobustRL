@@ -19,8 +19,8 @@ if __name__ == "__main__":
     )
     n_maps = 2500
     R_values = (0.0, 0.2, 0.4, 0.5)
-    C_values = (0.0, 0.5, 0.75, 1.0, 1.5, 2.0)
-    n_obstacles = (300, 400)
+    C_values = (0.0, 0.5, 0.75, 1.0, 2.0)
+    n_obstacles = (250, 400)
     seed = 7
 
     dataset_path = Path(__file__).resolve().parent / "saved_results/q_transformer/q_data_3d.npz"
