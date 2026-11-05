@@ -17,7 +17,7 @@ if __name__ == "__main__":
         start_cell=(1, 1, 1), goal_cell=(8, 8, 8),
         gamma=0.9, movement_reward=0.0, goal_reward=1.0,
     )
-    n_maps = 2500
+    n_maps = 2000
     R_values = (0.0, 0.2, 0.4, 0.5)
     C_values = (0.0, 0.5, 0.75, 1.0, 2.0)
     n_obstacles = (250, 400)
