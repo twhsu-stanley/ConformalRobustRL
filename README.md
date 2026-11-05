@@ -16,7 +16,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirement.txt
 python -m robot_2d.main_robot_2d_online
-python -m robot_2d.plot_online_comparison
+python -m robot_2d.plot_online_comparison_2d
 ```
 
 On Windows, create the environment with `py -m venv .venv` and activate it with
@@ -47,6 +47,11 @@ schedule and use separate random draws.
 The R-contamination baselines use prescribed R values as in Wang and Zou.
 When both R and C are fixed, the controller trains once and reuses the policy.
 Otherwise it recomputes the policy each deployment episode.
+General statistics and plots (`plot_R`, `plot_acp`, `plot_performance`, and
+`plot_conformal_history`) are shared in `utils_tabular.py`. Example-specific
+geometry, disturbances, and trajectory plots live in `robot_2d/utils_2d.py` and
+`robot_3d/utils_3d.py`. Each example owns its support schedule through
+`C_star_shift_2d` or `C_star_shift_3d`; their current numerical schedules are unchanged.
 
 Every `Robot2DMotionMDP` construction must explicitly specify `x_max`, `y_max`,
 `grid_shape`, `start_cell`, `goal_cell`, `gamma`, `movement_reward`, and
@@ -253,7 +258,9 @@ nominal positions, mismatches, score, outcomes, and training diagnostics.
 The grid center of a stored state is computed using `mdp.coordinates(state)`;
 a separate array of quantized positions is unnecessary.
 
-`plot_online_comparison()` takes no path argument and reads this fixed directory.
+`plot_comparison()` takes no path argument and reads this fixed directory. Run
+`python -m robot_2d.plot_online_comparison_2d` or
+`python -m robot_3d.plot_online_comparison_3d` for the respective example.
 It writes:
 
 - `r_estimation.png`: cumulative R estimates and the true R_star.
@@ -365,8 +372,8 @@ downloads the configured pretrained encoder/tokenizer; an existing local encoder
 directory can instead be assigned to `model_name`.
 The 3-D training script retains its checkpoint-50640 resume configuration. For a fresh
 run, set `resume_from_checkpoint=None` and `restart_lr_schedule=False`, and select the
-desired learning rates. In either script, `training_options` overrides the example
-defaults; `callbacks=[]` disables default early stopping.
+desired learning rates. Edit the single `training_options` dictionary in either
+script to configure the Trainer; `callbacks=[]` disables default early stopping.
 
 Data and weights go to `robot_2d/saved_results/q_transformer/`:
 

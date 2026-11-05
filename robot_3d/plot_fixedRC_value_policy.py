@@ -10,7 +10,7 @@ import numpy as np
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from robot_3d.utils import plot_robot_3d_tabular, plot_robot_motion
+from robot_3d.utils_3d import plot_robot_3d_tabular, plot_robot_motion
 
 
 if __name__ == "__main__":

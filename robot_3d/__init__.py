@@ -7,7 +7,7 @@ From the repository root:
     python -m robot_3d.plot_fixedRC_eval_returns
     python -m robot_3d.plot_fixedRC_value_policy
     python -m robot_3d.main_robot_3d_online
-    python -m robot_3d.plot_online_comparison
+    python -m robot_3d.plot_online_comparison_3d
 
 Configure runs in the scripts' main blocks. To enable warm starts after training,
 set checkpoint_path to Path(__file__).resolve().parent /

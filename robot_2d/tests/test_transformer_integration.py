@@ -9,7 +9,7 @@ from unittest.mock import patch
 import numpy as np
 
 from q_transformer.data import format_prompt, generate_q_data
-from robot_2d.generate_robot_2d_q_data import randomize_start_goal, training_maps
+from grid_q_data import randomize_start_goal, training_maps
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from tests.script_runner import script_entrypoint
 

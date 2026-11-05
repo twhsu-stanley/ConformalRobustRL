@@ -8,7 +8,7 @@ from gymnasium.utils.env_checker import check_env
 
 from Tabular_Agent import Tabular_Agent
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-from robot_3d.utils import C_star_shift, sample_deviation
+from robot_3d.utils_3d import C_star_shift_3d, sample_deviation
 
 
 class RobotMotionTests(unittest.TestCase):
@@ -167,7 +167,7 @@ class RobotMotionTests(unittest.TestCase):
         np.testing.assert_allclose(draws.mean(axis=0), 0, atol=0.04)
         rng = np.random.default_rng(7)
         for episode in (0, 49, 99):
-            radius = C_star_shift(episode)
+            radius = C_star_shift_3d(episode)
             draws = np.array([sample_deviation(np.zeros(3), rng, radius=radius, R_star=0.4)
                               for _ in range(2000)])
             lengths = np.linalg.norm(draws, axis=1)

@@ -1,10 +1,17 @@
-"""Plotting utilities for Robot2DMotionMDP experiments."""
+"""Disturbances, map generation, and plots for the 2-D robot example."""
+
+import math
+import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 
-def C_star_shift(episode, period=100):
+# Existing result files store sample_deviation under robot_2d.utils.
+sys.modules.setdefault("robot_2d.utils", sys.modules[__name__])
+
+
+def C_star_shift_2d(episode, period=100):
     """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
@@ -75,9 +82,7 @@ def plot_robot_map(mdp, axis):
         axis.text(x, y, label, ha="center", va="center", weight="bold")
 
 
-def plot_robot_motion(
-    mdp, Q, policy, trajectory=None, title="Robot motion", *, value_format=".2f",
-):
+def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion", *, value_format=".2f"):
     """Plot values, direction commands, and an optional continuous trajectory."""
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
     extent = (0, mdp.bounds[0], 0, mdp.bounds[1])
@@ -131,61 +136,69 @@ def plot_robot_2d_tabular(mdp, agent, *, show=True):
     return fig
 
 
-def plot_conformal_history(history, delta):
-    """Plot deployment uncertainty, showing estimation and ACP only when enabled."""
+def plot_trajectories(run, method_label):
+    """Overlay every recorded deployment episode on its trial's fixed obstacle map."""
+    mdp, history = run["mdp"], run["history"]
     if not history:
         raise ValueError("At least one deployment episode is required for plotting.")
-    has_acp = "C_hat" in history[0]
-    fig, axes = plt.subplots(3 if has_acp else 2, 2, figsize=(12, 11 if has_acp else 7),
-                             constrained_layout=True)
-    episodes = np.arange(1, len(history) + 1)
-    axes = axes.ravel()
-    axes[0].plot(episodes, [item["R_used"] for item in history], label="R used for training")
-    if "R_hat_next" in history[0]:
-        axes[0].plot(episodes, [item["R_hat_next"] for item in history], label="Updated R estimate")
-    axes[0].set(title="Planning R", ylabel="Probability", ylim=(0, 1))
-    scores = np.asarray([item["score"] for item in history], dtype=float)
-    radii = np.asarray([item["C_used"] for item in history])
-    finite_radii = np.where(np.isfinite(radii), radii, np.nan)
-    ceiling = max(1.0, np.nanmax(scores, initial=0),
-                  np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
-    axes[1].plot(episodes, scores, label="Maximum deviation")
-    axes[1].plot(episodes, finite_radii, label="Conformal radius" if has_acp else "Fixed radius")
-    if "C_star_k" in history[0]:
-        support_bounds = [item["C_star_k"] for item in history]
-        axes[1].plot(episodes, support_bounds, "k:", label="True C*")
-        ceiling = max(ceiling, max(support_bounds) * 1.1)
-    if np.any(np.isposinf(radii)):
-        axes[1].scatter(
-            episodes[np.isposinf(radii)], np.full(np.isposinf(radii).sum(), ceiling),
-            marker="^", label="Unbounded prediction",
-        )
-    axes[1].set(title="Continuous uncertainty", ylabel="Distance")
-    if has_acp:
-        axes[2].plot(episodes, [item["delta_k"] for item in history], label="Adaptive delta")
-        axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
-        axes[2].set(title="ACP update", ylabel="Failure parameter")
-        miscoverage = np.asarray([item["miscoverage"] for item in history], dtype=float)
-        coverage = 1 - np.cumsum(miscoverage) / episodes
-        axes[3].plot(episodes, coverage, label="Conformal coverage")
-        axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
-        axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
-    returns_axis, residual_axis = axes[-2:]
-    returns = [item["discounted_return"] for item in history]
-    returns_axis.plot(episodes, returns, label="Discounted r(s,a)")
-    for key, marker, color in (
-        ("goal_reached", "o", "green"), ("collision", "x", "red"),
-        ("workspace_exit", "x", "purple"),
-    ):
-        indices = np.flatnonzero([item[key] for item in history])
-        returns_axis.scatter(episodes[indices], np.asarray(returns)[indices], marker=marker,
-                             color=color, label=key.replace("_", " "))
-    returns_axis.set(title="Deployment outcomes", ylabel="Return")
-    residuals = [max(item["training"]["bellman_residual"], 1e-15) for item in history]
-    residual_axis.semilogy(episodes, residuals, label="Robust Bellman residual")
-    residual_axis.set(title="Finite training accuracy", ylabel="Residual")
-    for axis in axes:
-        axis.set_xlabel("Deployment episode")
-        axis.grid(alpha=0.25)
-        axis.legend(fontsize=8)
+    fig, axis = plt.subplots(figsize=(8, 7), constrained_layout=True)
+    plot_robot_map(mdp, axis)
+    cmap = plt.get_cmap("viridis")
+    norm = plt.Normalize(vmin=0.5, vmax=len(history) + 0.5)
+    trajectories = [np.asarray(row["positions"]) for row in history]
+    for episode, trajectory in enumerate(trajectories, 1):
+        axis.plot(trajectory[:, 0], trajectory[:, 1], color=cmap(norm(episode)),
+                  linewidth=1, alpha=0.5, marker=".", markersize=3)
+    positions = np.concatenate(trajectories)
+    lo = np.minimum(positions.min(axis=0), 0) - 0.2 * mdp.cell_widths
+    hi = np.maximum(positions.max(axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
+    axis.set(xlim=(lo[0], hi[0]), ylim=(lo[1], hi[1]))
+    ticks = np.unique(np.linspace(1, len(history), min(6, len(history)), dtype=int))
+    fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
+                 ticks=ticks, label="Deployment episode")
+    axis.set_title(f"{method_label}, trial {run['trial']}\n"
+                   f"{len(history)} deployment trajectories")
     return fig
+
+
+def disk_rectangle_area(radius, xlo, xhi, ylo, yhi):
+    """Disk/rectangle intersection, used only for the offline mismatch reference."""
+    xlo, xhi = max(-radius, xlo), min(radius, xhi)
+    ylo, yhi = max(-radius, ylo), min(radius, yhi)
+    if xlo >= xhi or ylo >= yhi:
+        return 0.0
+    splits = [xlo, xhi]
+    for height in (ylo, yhi):
+        if abs(height) < radius:
+            root = math.sqrt(radius**2 - height**2)
+            splits.extend(x for x in (-root, root) if xlo < x < xhi)
+    splits = sorted(set(splits))
+
+    def primitive(x):
+        root = math.sqrt(max(0.0, radius**2 - x**2))
+        return 0.5 * (x * root + radius**2 * math.asin(x / radius))
+
+    area = 0.0
+    for left, right in zip(splits[:-1], splits[1:]):
+        height = math.sqrt(max(0.0, radius**2 - ((left + right) / 2)**2))
+        if min(yhi, height) <= max(ylo, -height):
+            continue
+        upper_const, upper_arc = (yhi, 0) if yhi < height else (0, 1)
+        lower_const, lower_arc = (ylo, 0) if ylo > -height else (0, -1)
+        area += (upper_const - lower_const) * (right - left)
+        area += (upper_arc - lower_arc) * (primitive(right) - primitive(left))
+    return max(0.0, area)
+
+
+def mismatch_probabilities(mdp):
+    """Common mismatch probability for every grid source, including the goal."""
+    if mdp.noise_sampler is not None:
+        raise ValueError("This offline reference assumes the default zero/uniform-disk noise.")
+    probability = 0.0
+    if mdp.noise_radius > 0:
+        hx, hy = mdp.cell_widths / 2
+        area = disk_rectangle_area(mdp.noise_radius, -hx, hx, -hy, hy)
+        nominal_mass = area / (np.pi * mdp.noise_radius**2)
+        probability = mdp.noise_probability * (1 - nominal_mass)
+    result = np.full((mdp.n_state, mdp.action_space.n), probability)
+    return np.clip(result, 0, 1)

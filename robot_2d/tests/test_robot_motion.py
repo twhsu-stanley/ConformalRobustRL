@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from gymnasium.utils.env_checker import check_env
 
-from robot_2d.utils import plot_robot_2d_tabular
+from robot_2d.utils_2d import plot_robot_2d_tabular
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from Tabular_Agent import Tabular_Agent
 from tests.script_runner import script_entrypoint
@@ -536,4 +536,3 @@ class OnlineRunnerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

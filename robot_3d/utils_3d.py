@@ -1,8 +1,22 @@
 """Map generation, disturbances, and plots for the 3-D robot example."""
 
 
+import sys
+
 import matplotlib.pyplot as plt
 import numpy as np
+
+
+# Existing result files store sample_deviation under robot_3d.utils.
+sys.modules.setdefault("robot_3d.utils", sys.modules[__name__])
+
+
+def C_star_shift_3d(episode, period=100):
+    """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
+    if not isinstance(period, (int, np.integer)) or period < 2:
+        raise ValueError("The distribution-shift period must be an integer of at least 2.")
+    phase = (episode % period + 0.5) / period
+    return float(0.5 + 1.0 * np.cos(np.pi * phase)**2)
 
 
 def sample_deviation(nominal_position, rng, *, radius, R_star):
@@ -72,8 +86,7 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
         axes[1].plot(*trajectory.T, "o-", color="tab:orange", markersize=3)
         lower = np.minimum(trajectory.min(axis=0), 0) - 0.2 * mdp.cell_widths
         upper = np.maximum(trajectory.max(axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
-        axes[1].set(xlim=(lower[0], upper[0]), ylim=(lower[1], upper[1]),
-                    zlim=(lower[2], upper[2]))
+        axes[1].set(xlim=(lower[0], upper[0]), ylim=(lower[1], upper[1]), zlim=(lower[2], upper[2]))
     axes[0].set_title("Value function")
     axes[1].set_title("Policy and deployment trajectory")
     fig.suptitle(title)
@@ -127,69 +140,27 @@ def plot_robot_3d_tabular(mdp, agent, *, z_layers=None, show=True):
     return fig
 
 
-def C_star_shift(episode, period=100):
-    """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
-    if not isinstance(period, (int, np.integer)) or period < 2:
-        raise ValueError("The distribution-shift period must be an integer of at least 2.")
-    phase = (episode % period + 0.5) / period
-    return float(0.5 + 1.0 * np.cos(np.pi * phase)**2)
-
-
-def plot_conformal_history(history, delta):
-    """Plot deployment uncertainty, showing estimation and ACP only when enabled."""
+def plot_trajectories(run, method_label):
+    """Overlay every recorded deployment episode on its trial's fixed obstacle map."""
+    mdp, history = run["mdp"], run["history"]
     if not history:
         raise ValueError("At least one deployment episode is required for plotting.")
-    has_acp = "C_hat" in history[0]
-    fig, axes = plt.subplots(3 if has_acp else 2, 2, figsize=(12, 11 if has_acp else 7),
-                             constrained_layout=True)
-    episodes = np.arange(1, len(history) + 1)
-    axes = axes.ravel()
-    axes[0].plot(episodes, [item["R_used"] for item in history], label="R used for training")
-    if "R_hat_next" in history[0]:
-        axes[0].plot(episodes, [item["R_hat_next"] for item in history], label="Updated R estimate")
-    axes[0].set(title="Planning R", ylabel="Probability", ylim=(0, 1))
-    scores = np.asarray([item["score"] for item in history], dtype=float)
-    radii = np.asarray([item["C_used"] for item in history])
-    finite_radii = np.where(np.isfinite(radii), radii, np.nan)
-    ceiling = max(1.0, np.nanmax(scores, initial=0),
-                  np.max(radii[np.isfinite(radii)], initial=0)) * 1.1
-    axes[1].plot(episodes, scores, label="Maximum deviation")
-    axes[1].plot(episodes, finite_radii, label="Conformal radius" if has_acp else "Fixed radius")
-    if "C_star_k" in history[0]:
-        support_bounds = [item["C_star_k"] for item in history]
-        axes[1].plot(episodes, support_bounds, "k:", label="True C*")
-        ceiling = max(ceiling, max(support_bounds) * 1.1)
-    if np.any(np.isposinf(radii)):
-        axes[1].scatter(
-            episodes[np.isposinf(radii)], np.full(np.isposinf(radii).sum(), ceiling),
-            marker="^", label="Unbounded prediction",
-        )
-    axes[1].set(title="Continuous uncertainty", ylabel="Distance")
-    if has_acp:
-        axes[2].plot(episodes, [item["delta_k"] for item in history], label="Adaptive delta")
-        axes[2].axhline(delta, color="black", linestyle="--", label="Target failure")
-        axes[2].set(title="ACP update", ylabel="Failure parameter")
-        miscoverage = np.asarray([item["miscoverage"] for item in history], dtype=float)
-        coverage = 1 - np.cumsum(miscoverage) / episodes
-        axes[3].plot(episodes, coverage, label="Conformal coverage")
-        axes[3].axhline(1 - delta, color="black", linestyle="--", label="Coverage target")
-        axes[3].set(title="Cumulative empirical coverage", ylabel="Fraction", ylim=(0, 1.05))
-    returns_axis, residual_axis = axes[-2:]
-    returns = [item["discounted_return"] for item in history]
-    returns_axis.plot(episodes, returns, label="Discounted r(s,a)")
-    for key, marker, color in (
-        ("goal_reached", "o", "green"), ("collision", "x", "red"),
-        ("workspace_exit", "x", "purple"),
-    ):
-        indices = np.flatnonzero([item[key] for item in history])
-        returns_axis.scatter(episodes[indices], np.asarray(returns)[indices], marker=marker,
-                             color=color, label=key.replace("_", " "))
-    returns_axis.set(title="Deployment outcomes", ylabel="Return")
-    residuals = [max(item["training"]["bellman_residual"], 1e-15) for item in history]
-    residual_axis.semilogy(episodes, residuals, label="Robust Bellman residual")
-    residual_axis.set(title="Finite training accuracy", ylabel="Residual")
-    for axis in axes:
-        axis.set_xlabel("Deployment episode")
-        axis.grid(alpha=0.25)
-        axis.legend(fontsize=8)
+    fig = plt.figure(figsize=(9, 8), constrained_layout=True)
+    axis = fig.add_subplot(projection="3d")
+    plot_robot_map(mdp, axis)
+    cmap = plt.get_cmap("viridis")
+    norm = plt.Normalize(vmin=0.5, vmax=len(history) + 0.5)
+    trajectories = [np.asarray(row["positions"]) for row in history]
+    for episode, trajectory in enumerate(trajectories, 1):
+        axis.plot(*trajectory.T, color=cmap(norm(episode)),
+                  linewidth=1, alpha=0.5, marker=".", markersize=3)
+    positions = np.concatenate(trajectories)
+    lo = np.minimum(positions.min(axis=0), 0) - 0.2 * mdp.cell_widths
+    hi = np.maximum(positions.max(axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
+    axis.set(xlim=(lo[0], hi[0]), ylim=(lo[1], hi[1]), zlim=(lo[2], hi[2]))
+    ticks = np.unique(np.linspace(1, len(history), min(6, len(history)), dtype=int))
+    fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
+                 ticks=ticks, label="Deployment episode")
+    axis.set_title(f"{method_label}, trial {run['trial']}\n"
+                   f"{len(history)} deployment trajectories")
     return fig

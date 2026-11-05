@@ -13,7 +13,7 @@ if not __package__:
 
 from q_transformer.data import format_prompt
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils import plot_robot_motion
+from robot_2d.utils_2d import plot_robot_motion
 
 
 def _mdp_from_description(description):

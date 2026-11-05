@@ -12,7 +12,7 @@ if not __package__:
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils import C_star_shift, sample_deviation
+from robot_2d.utils_2d import C_star_shift_2d, sample_deviation
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -73,7 +73,7 @@ if __name__ == "__main__":
         raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
 
     def prepare_episode(controller, episode):
-        radius = C_star_shift(episode, shift_period)
+        radius = C_star_shift_2d(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
             sample_deviation, radius=radius, R_star=R_star,
@@ -127,7 +127,8 @@ if __name__ == "__main__":
             if save_plots:
                 import matplotlib
                 matplotlib.use("Agg")
-                from robot_2d.utils import plot_conformal_history, plot_robot_motion
+                from robot_2d.utils_2d import plot_robot_motion
+                from utils_tabular import plot_conformal_history
                 import matplotlib.pyplot as plt
                 if controller.fixed_R is None or controller.acp is not None:
                     fig = plot_conformal_history(controller.history, controller.delta)

@@ -10,8 +10,7 @@ from unittest.mock import patch
 import numpy as np
 
 from conformally_robust_controller import ConformallyRobustController
-from robot_2d.utils import randomize_obstacles
-from robot_2d.plot_online_comparison import mismatch_probabilities
+from robot_2d.utils_2d import mismatch_probabilities, randomize_obstacles
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from tests.script_runner import script_entrypoint
 
@@ -159,7 +158,7 @@ class OnlineSettingsTests(unittest.TestCase):
             tempfile.TemporaryDirectory(prefix="robot_no_acp_") as directory,
             patch("robot_2d.main_robot_2d_online.__file__", str(Path(directory) / "main.py")),
             patch("conformally_robust_controller.ACP", side_effect=AssertionError("ACP called")),
-            patch("robot_2d.utils.plot_conformal_history", side_effect=AssertionError("ACP plot")),
+            patch("utils_tabular.plot_conformal_history", side_effect=AssertionError("ACP plot")),
         ):
             output_dir = Path(directory) / "saved_results/online"
             for method in ("nominal", "R_contamination_0.1", "R_contamination_0.5"):

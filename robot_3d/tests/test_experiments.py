@@ -17,11 +17,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from q_transformer.data import format_prompt
-from robot_3d.generate_robot_3d_q_data import randomize_start_goal, training_maps
+from grid_q_data import randomize_start_goal, training_maps
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
-from robot_3d.plot_online_comparison import plot_comparison
+from robot_3d.plot_online_comparison_3d import plot_comparison
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-from robot_3d.utils import plot_robot_map, plot_robot_motion
+from robot_3d.utils_3d import plot_robot_map, plot_robot_motion
 from tests.script_runner import script_entrypoint
 
 
@@ -172,7 +172,7 @@ class ExperimentTests(unittest.TestCase):
                         self.assertIsNone(controller.acp)
                         self.assertTrue(controller.history[1]["training_reused"])
             self.assertTrue(all(schedule == schedules[0] for schedule in schedules))
-            with patch("robot_3d.plot_online_comparison.__file__", filename):
+            with patch("robot_3d.plot_online_comparison_3d.__file__", filename):
                 plot_comparison()
             output = Path(directory) / "saved_results/online"
             for name in ("policy_comparison.png", "r_estimation.png", "acp_calibration.png"):
@@ -207,7 +207,7 @@ class ExperimentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             for name in ("main_robot_3d", "main_robot_3d_online", "generate_robot_3d_q_data",
                          "train_robot_3d_transformer", "plot_fixedRC_eval_returns",
-                         "plot_fixedRC_value_policy", "plot_online_comparison"):
+                         "plot_fixedRC_value_policy", "plot_online_comparison_3d"):
                 code = f"import runpy; runpy.run_path({str(scripts / (name + '.py'))!r})"
                 result = subprocess.run([sys.executable, "-I", "-B", "-c", code], cwd=directory,
                                         capture_output=True, text=True, timeout=60)

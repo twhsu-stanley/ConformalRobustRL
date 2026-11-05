@@ -70,7 +70,6 @@ class TransformerTrainingTests(unittest.TestCase):
                     "robot_2d.train_robot_2d_transformer",
                     dataset_path=dataset_path, checkpoint_path=checkpoint,
                     model_name=str(encoder_path), epochs=2, learning_rate=0.01, device="cpu",
-                    training_options={"disable_tqdm": True},
                 )
             trainer = trainers[0]
             with np.load(dataset_path, allow_pickle=False) as data:
