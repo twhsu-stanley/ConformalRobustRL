@@ -22,8 +22,9 @@ if __name__ == "__main__":
     C_values = (0.0, 0.5, 0.75, 1.0, 2.0)
     n_obstacles = (250, 400)
     seed = 7
+    n_workers = 8
 
     dataset_path = Path(__file__).resolve().parent / "saved_results/q_transformer/q_data_3d.npz"
     maps = training_maps(mdp, n_maps, n_obstacles=n_obstacles, seed=seed)
-    generate_q_data(maps, R_values, C_values, dataset_path, n_maps=n_maps)
+    generate_q_data(maps, R_values, C_values, dataset_path, n_maps=n_maps, n_workers=n_workers)
     print(f"Saved Q-table dataset to {dataset_path}")

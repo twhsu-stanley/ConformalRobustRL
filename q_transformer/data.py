@@ -1,5 +1,9 @@
 """Dimension-independent MDP descriptions and robust value-iteration training data."""
 
+from collections import deque
+from concurrent.futures import ProcessPoolExecutor
+from contextlib import nullcontext
+from multiprocessing import get_context
 from pathlib import Path
 
 import numpy as np
@@ -20,8 +24,21 @@ def format_prompt(description, R, C):
     )
 
 
+def _solve_map(mdp, conditions, tolerance, max_iterations, progress=None):
+    """Solve every R/C combination in one process, reusing the map's uncertainty cache."""
+    agent = Tabular_Agent(mdp, lr_init=0.5)
+    targets, residuals = [], []
+    for R, C in conditions:
+        Q, _ = agent.value_iteration(R=R, C=C, tolerance=tolerance, max_iterations=max_iterations)
+        targets.append(Q)
+        residuals.append(agent.value_iteration_diagnostics["bellman_residual"])
+        if progress is not None:
+            progress.update(1)
+    return np.asarray(targets), residuals
+
+
 def generate_q_data(
-    mdps, R_values, C_values, output_path, *, n_maps=None,
+    mdps, R_values, C_values, output_path, *, n_maps=None, n_workers=1,
     tolerance=1e-8, max_iterations=10000,
 ):
     """Save numeric Q targets, storing each distinct map description only once.
@@ -31,20 +48,43 @@ def generate_q_data(
     Each MDP supplies its discount. Use consistent geometry, action ordering,
     rewards, and discount throughout a dataset.
     Supply n_maps for a progress total when mdps is a generator without a length.
+    n_workers>1 solves independent, picklable maps in CPU processes. Map generation
+    and saved record order stay unchanged; at most 2*n_workers maps are pending.
+    Parallel progress advances by one map's completed Q-tables at a time.
     """
+    if not isinstance(n_workers, (int, np.integer)) or n_workers < 1:
+        raise ValueError("n_workers must be a positive integer.")
+    n_workers = int(n_workers)
     R_values, C_values = tuple(R_values), tuple(C_values)
     if not R_values or not C_values:
         raise ValueError("Provide at least one R and C value.")
-    for R in R_values:
-        for C in C_values:
-            Tabular_Agent._validate_uncertainty(R, C)
+    conditions = [(R, C) for R in R_values for C in C_values]
+    for R, C in conditions:
+        Tabular_Agent._validate_uncertainty(R, C)
     descriptions, map_indices, radii, levels, targets, residuals = [], [], [], [], [], []
     seen = set()
     if n_maps is None and hasattr(mdps, "__len__"):
         n_maps = len(mdps)
-    samples_per_map = len(R_values) * len(C_values)
+    samples_per_map = len(conditions)
     total = None if n_maps is None else n_maps * samples_per_map
-    with tqdm(total=total, desc="Generating Q tables", unit="sample") as progress:
+    pool = nullcontext()
+    if n_workers > 1:
+        pool = ProcessPoolExecutor(max_workers=n_workers, mp_context=get_context("spawn"))
+    with pool as executor, tqdm(total=total, desc="Generating Q tables", unit="sample") as progress:
+        pending = deque()
+
+        def collect(map_index, result):
+            Q_tables, errors = result
+            if targets and Q_tables.shape[1:] != targets[0].shape:
+                raise ValueError("All training maps must have the same Q-table shape.")
+            map_indices.extend([map_index] * samples_per_map)
+            levels.extend(R for R, _ in conditions)
+            radii.extend(C for _, C in conditions)
+            targets.extend(Q_tables)
+            residuals.extend(errors)
+            if executor is not None:
+                progress.update(samples_per_map)
+
         for mdp in mdps:
             description = mdp.unwrapped.q_transformer_context()
             if description in seen:
@@ -55,20 +95,16 @@ def generate_q_data(
             seen.add(description)
             map_index = len(descriptions)
             descriptions.append(description)
-            agent = Tabular_Agent(mdp, lr_init=0.5)
-            if targets and agent.Q.shape != targets[0].shape:
-                raise ValueError("All training maps must have the same Q-table shape.")
-            for R in R_values:
-                for C in C_values:
-                    Q, _ = agent.value_iteration(
-                        R=R, C=C, tolerance=tolerance, max_iterations=max_iterations,
-                    )
-                    map_indices.append(map_index)
-                    levels.append(R)
-                    radii.append(C)
-                    targets.append(Q)
-                    residuals.append(agent.value_iteration_diagnostics["bellman_residual"])
-                    progress.update(1)
+            if executor is None:
+                collect(map_index, _solve_map(mdp, conditions, tolerance, max_iterations, progress))
+            else:
+                future = executor.submit(_solve_map, mdp, conditions, tolerance, max_iterations)
+                pending.append((map_index, future))
+                if len(pending) >= 2 * n_workers:
+                    index, future = pending.popleft()
+                    collect(index, future.result())
+        for index, future in pending:
+            collect(index, future.result())
     if not targets:
         raise ValueError("Provide at least one MDP.")
     output_path = Path(output_path)

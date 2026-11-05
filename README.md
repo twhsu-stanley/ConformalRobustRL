@@ -16,7 +16,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirement.txt
 python -m robot_2d.main_robot_2d_online
-python -m robot_2d.plot_online_comparison_2d
+python -m robot_2d.plot_robot_2d_online_comparison
 ```
 
 On Windows, create the environment with `py -m venv .venv` and activate it with
@@ -260,9 +260,9 @@ nominal positions, mismatches, score, outcomes, and training diagnostics.
 The grid center of a stored state is computed using `mdp.coordinates(state)`;
 a separate array of quantized positions is unnecessary.
 
-`plot_comparison()` takes no path argument and reads this fixed directory. Run
-`python -m robot_2d.plot_online_comparison_2d` or
-`python -m robot_3d.plot_online_comparison_3d` for the respective example.
+The online plotting scripts read this fixed directory directly. Run
+`python -m robot_2d.plot_robot_2d_online_comparison` or
+`python -m robot_3d.plot_robot_3d_online_comparison` for the respective example.
 It writes:
 
 - `r_estimation.png`: cumulative R estimates and the true R_star.
@@ -283,8 +283,8 @@ filenames and output locations are retained; rerunning a setting replaces its fi
 
 ```powershell
 python -m robot_2d.main_robot_2d
-python -m robot_2d.plot_fixedRC_eval_returns
-python -m robot_2d.plot_fixedRC_value_policy
+python -m robot_2d.plot_robot_2d_fxRC_eval_returns
+python -m robot_2d.plot_robot_2d_fxRC_value_policy
 ```
 
 Edit the fixed-R/C calls at the bottom of `main_robot_2d.py`. Outputs go to
@@ -332,6 +332,13 @@ python -m robot_2d.train_robot_2d_transformer
 
 Configure the map count and R/C values in each dataset generator's main block.
 Both scripts share the map construction in `grid_q_data.py`.
+Both generators set `n_workers=8` for CPU process parallelism; set it to 1 for serial
+generation. The shared `generate_q_data()` function defaults to one worker.
+Maps are still generated sequentially with the same seed. Each worker solves all
+R/C combinations for one map, and the parent saves results in their original order.
+At most twice the worker count of maps are pending. Only the parent updates the
+progress bar and writes the dataset; parallel progress advances one completed map
+at a time, counting all of that map's Q-tables. Dataset generation does not use GPUs.
 The start is fixed at cell index `(1,1)` or `(1,1,1)`. Each goal coordinate is
 sampled from `{5,6,7,8}` on the current ten-cell axes, leaving at least one cell
 between the goal and the workspace border. No minimum start-goal distance is used.
@@ -354,16 +361,16 @@ two distinct obstacle cells. Intersections are counted along the complete segmen
 including contact with obstacle faces, edges, and corners. Each cell is counted once.
 
 Obstacles are sampled outside the protected cells. The requested count ranges
-are 25-40 in 2-D and 300-400 in 3-D; each map samples only counts that fit its
+are 25-40 in 2-D and 250-400 in 3-D; each map samples only counts that fit its
 remaining cells. An infeasible minimum raises an error rather than weakening the
 clearance requirements. The seed controls all sampling, and generated maps are
 distinct. Geometry, rewards, and discount are explicitly configured in each script.
 Dataset generation does not import transformer libraries.
 
 Both scripts use `R_values=(0,0.2,0.4,0.5)`. The 2-D radii are
-`C_values=(0,0.5,0.75,1.5,2)`; the 3-D radii additionally include `C=1`.
-Each map produces 20 samples in 2-D and 24 in 3-D, so 3,000 maps produce
-60,000 and 72,000 samples, respectively.
+`C_values=(0,0.5,0.75,1.5,2)`; the 3-D radii are `(0,0.5,0.75,1,2)`.
+Each map produces 20 samples in either example. Both scripts currently generate
+2,000 maps, giving 40,000 samples per dataset.
 A progress bar counts completed Q-table samples across all maps and R/C
 combinations, showing the total, elapsed time, and estimated time remaining.
 

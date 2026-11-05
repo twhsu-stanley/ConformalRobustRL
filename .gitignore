@@ -5,3 +5,4 @@ __pycache__/
 results/
 Tabular/
 saved_results/
+tests/
