@@ -133,6 +133,7 @@ updates alone do not establish convergence, because unvisited pairs and decaying
 learning rates can hide large Bellman errors.
 
 Value iteration retains `tolerance=1e-8` and `max_iterations=10000` by default.
+It also accepts `initial_Q=predicted_Q`; omitting it preserves zero initialization.
 Each solver records its actual work, residual, tolerance, and `converged` status
 in its diagnostics. Reaching a safety cap without convergence raises an error;
 the controller does not deploy that policy. Fixed-R,C learning-curve plots keep
@@ -429,6 +430,17 @@ Each checkpoint has a fixed shape; a 3-D example uses the same implementation
 with its own MDP, training configuration, and checkpoint. Training infers state
 and action counts from the Q labels; the checkpoint stores just these dimensions
 alongside its weights and tokenizer settings.
+
+Run `python -m robot_2d.evaluate_robot_2d_transformer` or
+`python -m robot_3d.evaluate_robot_3d_transformer` to evaluate the respective saved
+checkpoint against its dataset. Both use the shared evaluator in
+`q_transformer/evaluate.py`: 10 maps from the original validation split, all 20 R/C
+conditions on each, and one paired solver case per condition across those maps.
+Both starts use the same Bellman tolerance and populated uncertainty cache.
+Timing includes a separate inference measurement; one-time model loading is
+reported separately. Results go to `evaluation.csv`, `evaluation.json`, and
+`prediction_evaluation.png` in each example's `saved_results/q_transformer/`.
+Training and checkpoint files are unchanged.
 
 An MDP participating in transformer training implements `q_transformer_context()`:
 

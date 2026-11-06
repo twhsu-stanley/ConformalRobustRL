@@ -106,8 +106,10 @@ class Tabular_Agent:
                 residual = max(residual, abs(target - self.Q[row, action]))
         return float(residual)
 
-    def value_iteration(self, *, R=None, C=None, tolerance=1e-8, max_iterations=10000):
-        """Solve the known nominal model synchronously; reject unconverged teacher labels."""
+    def value_iteration(
+        self, *, R=None, C=None, tolerance=1e-8, max_iterations=10000, initial_Q=None,
+    ):
+        """Solve synchronously from zeros or initial_Q; reject unconverged solutions."""
         if not np.isfinite(tolerance) or tolerance <= 0:
             raise ValueError("tolerance must be positive and finite.")
         if not isinstance(max_iterations, (int, np.integer)) or max_iterations < 1:
@@ -116,7 +118,10 @@ class Tabular_Agent:
         self.C = self.C if C is None else C
         self._validate_uncertainty(self.R, self.C)
         base = self.env.unwrapped
-        self.initialize_q()
+        if initial_Q is None:
+            self.initialize_q()
+        else:
+            self.initialize_q(initial_Q)
         self.Q[base.terminal_mask] = 0.0
         residual = self.robust_bellman_residual()
         iteration = 0
