@@ -297,116 +297,127 @@ training transitions; they are not sampled deployment returns.
 ## Optional transformer warm start
 
 Executable scripts keep their settings and workflow under `if __name__ == "__main__":`.
-Edit the settings there, then run the script or module; importing it does not run experiments.
-The fixed-R/C 2-D script currently enables its saved transformer checkpoint;
-set `checkpoint_path=None` there for zeros. Transformer code is shared
-across examples in `q_transformer/`; it contains no robot or 2-D imports:
+Importing a script does not run experiments. Transformer code is shared in
+`q_transformer/`; it has no imports from the robot examples.
 
-- `data.py` generates numeric Q-table labels using robust value iteration and
-  provides seeded splitting. Both example training scripts split by map, keeping
-  all R/C variants of a map together in either training or validation.
-- `model.py` implements the supplied encoder/mean-pooling/regression architecture
-  and frozen checkpoint inference. R and C condition the input; only Q is predicted.
-  It also provides BERT position extension and the shared prompt tokenizer. The 3-D
-  scripts use `truncation=False` to reject overlong inputs; the 2-D truncation policy is unchanged.
-- `train.py` fine-tunes the encoder and Q head with Huber loss and AdamW.
-  Both examples use a 100-epoch limit, weight decay 0.01, gradient clipping at 1.0,
-  one batch per optimizer update, and linear learning-rate decay with 5% warmup.
-  They reserve 10% of maps for validation, evaluate each epoch, and select the best
-  checkpoint by validation RMSE. Early stopping has patience five evaluations and
-  an improvement threshold of 1e-5. Up to five numbered checkpoints are retained.
-  Both request BF16 when CUDA supports it, with FP16 fallback on other CUDA GPUs
-  and FP32 on CPU; supported GPUs also enable TF32. The 2-D script retains batch
-  size 4, learning rate 1e-5, and pretrained BERT's 512 positions. Head weights
-  start uniformly in [-1, 1]. Logging occurs at global step one and every 50 updates.
+- `data.py` generates robust value-iteration Q labels, formats map prompts, parses
+  binary-grid descriptions, and provides seeded map-level splitting.
+- `model.py` combines a BERT embedding for each grid cell with explicit numerical
+  MDP features. A width-128 decoder shared across cells predicts that cell's action
+  values. Terminal outputs are exactly zero.
+- `train.py` trains the encoder and decoder jointly from the original pretrained
+  BERT weights and a new decoder. Existing Q-transformer checkpoints are never
+  loaded. The 3-D encoder extends BERT's original 512 position embeddings to 1536,
+  randomly initializes the extra positions, and trains all positions.
+- The robot MDP supplies `q_transformer_features(R, C)`. Inputs are normalized
+  state coordinates, normalized goal displacement, R, C/(1+C), nominal-successor
+  terminal indicators, rewards, and localized-uncertainty terminal indicators.
+  Infinite C is encoded as one; the MDP still uses the original radius for its
+  uncertainty sets, including outside terminal cells. This gives 18 features per
+  2-D cell and 26 per 3-D cell. Features never use Q labels or unknown disturbances.
 
-Training automatically selects an NVIDIA CUDA GPU when available and falls back
-to CPU with FP32 otherwise. The startup message shows the selected device and
-precision. GPU training requires a CUDA-enabled PyTorch installation.
+The text prompt contains the full binary grid and start/goal coordinates, followed
+by "Predict the Q-table." R and C are numerical inputs. A fast tokenizer aligns
+each grid entry with exactly one BERT token in Q-table row order. Both examples
+reject overlong prompts; neither truncates grid cells. Token capacities are 512
+for 2-D and 1536 for 3-D, with padding to the longest complete prompt.
 
-Generate the dataset once, then train from the saved file:
+Generate a dataset once, then train from its saved file:
 
 ```powershell
 python -m robot_2d.generate_robot_2d_q_data
 python -m robot_2d.train_robot_2d_transformer
 ```
 
-Configure the map count and R/C values in each dataset generator's main block.
-Both scripts share the map construction in `grid_q_data.py`.
-Both generators set `n_workers=8` for CPU process parallelism; set it to 1 for serial
-generation. The shared `generate_q_data()` function defaults to one worker.
-Maps are still generated sequentially with the same seed. Each worker solves all
-R/C combinations for one map, and the parent saves results in their original order.
-At most twice the worker count of maps are pending. Only the parent updates the
-progress bar and writes the dataset; parallel progress advances one completed map
-at a time, counting all of that map's Q-tables. Dataset generation does not use GPUs.
-The start is fixed at cell index `(1,1)` or `(1,1,1)`. Each goal coordinate is
-sampled from `{5,6,7,8}` on the current ten-cell axes, leaving at least one cell
-between the goal and the workspace border. No minimum start-goal distance is used.
+For 3-D:
 
-Each map reserves two distinct routes, while allowing additional routes. The wide
-passage is at least two cells across in 2-D and has at least a `2x2` free-cell
-cross-section in 3-D. Sliding `2x2` squares or `2x2x2` cubes share full faces,
-preserving this width through turns. These dimensions specify total passage size,
-not a clearance radius around a centerline. Both endpoints separately retain their
-obstacle buffers of two cell widths. The second route has a one-cell-wide or
-`1x1` bottleneck between obstacle walls. No additional open region is reserved,
-and the wide route is not required to pass through the center. Map construction
-does not depend on the sampled R or C values. Geometries that cannot accommodate
-the two routes and requested obstacle count are resampled.
-Every nonterminal free cell must have a path to both the start and the goal.
-Disconnected free regions are rejected. The connectivity check treats the goal
-as an endpoint, so reaching the start never requires passing through the goal.
-The straight segment connecting the start and goal cell centers must hit at least
-two distinct obstacle cells. Intersections are counted along the complete segment,
-including contact with obstacle faces, edges, and corners. Each cell is counted once.
-
-Obstacles are sampled outside the protected cells. The requested count ranges
-are 25-40 in 2-D and 250-400 in 3-D; each map samples only counts that fit its
-remaining cells. An infeasible minimum raises an error rather than weakening the
-clearance requirements. The seed controls all sampling, and generated maps are
-distinct. Geometry, rewards, and discount are explicitly configured in each script.
-Dataset generation does not import transformer libraries.
-
-Both scripts use `R_values=(0,0.2,0.4,0.5)`. The 2-D radii are
-`C_values=(0,0.5,0.75,1.5,2)`; the 3-D radii are `(0,0.5,0.75,1,2)`.
-Each map produces 20 samples in either example. Both scripts currently generate
-2,000 maps, giving 40,000 samples per dataset.
-A progress bar counts completed Q-table samples across all maps and R/C
-combinations, showing the total, elapsed time, and estimated time remaining.
-
-`train_robot_2d_transformer.py` only loads the existing dataset and trains the model.
-Configure training settings, including validation fraction, map splitting, token length,
-device, callbacks, and native Trainer overrides, in its main block. Rerunning this
-script reuses the dataset; it never generates maps or runs value iteration. If the
-dataset is missing, it reports the generation command. The first training run
-downloads the configured pretrained encoder/tokenizer; an existing local encoder
-directory can instead be assigned to `model_name`.
-The 3-D training script retains its checkpoint-50640 resume configuration. For a fresh
-run, set `resume_from_checkpoint=None` and `restart_lr_schedule=False`, and select the
-desired learning rates. Edit the single `training_options` dictionary in either
-script to configure the Trainer; `callbacks=[]` disables default early stopping.
-
-Data and weights go to `robot_2d/saved_results/q_transformer/`:
-
-```text
-q_data_2d.npz           # Numeric Q labels, R/C, unique map descriptions, and residuals
-checkpoint/            # Final model.pt plus its encoder config and tokenizer
-checkpoint/checkpoint-*/ # Per-epoch models, optimizer/scheduler state, and Trainer state
+```powershell
+python -m robot_3d.generate_robot_3d_q_data
+python -m robot_3d.train_robot_3d_transformer
 ```
 
-The 3-D dataset is `robot_3d/saved_results/q_transformer/q_data_3d.npz`.
+Existing `q_data_2d.npz` and `q_data_3d.npz` remain valid. No label regeneration is
+required for the new architecture. Dataset generation does not import PyTorch or
+Transformers. Generation uses robust value iteration on nominal deterministic
+transitions, with zero terminal values and a Bellman-residual stopping tolerance.
 
-`Tabular_Agent.value_iteration()` uses the same robust target and MDP uncertainty
-set as Q-learning. Each iteration reads a frozen previous value function, uses no
-learning rate or sampled transitions, and keeps terminal values zero. Labels are
-accepted only after the Bellman residual meets tolerance; exceeding the iteration
-limit raises an error. This solver is for offline labels. Online Algorithm 1 still
-uses Q-learning after initialization.
+Each generator uses 2,000 maps and all 20 R/C combinations per map, producing
+40,000 target Q-tables. Both use `R_values=(0,0.2,0.4,0.5)`. The 2-D radii are
+`(0,0.5,0.75,1.5,2)`; the 3-D radii are `(0,0.5,0.75,1,2)`.
+The structured map generator fixes the start at (1,1) or (1,1,1), samples an
+interior goal in the opposite half, protects endpoint obstacle clearance, and
+provides both a wide route and a narrower route. The wide route admits a two-cell
+cross-section in 2-D and a 2-by-2 cross-section in 3-D. Every free cell connects to
+the start and goal; at least two obstacles intersect their straight segment.
+Additional routes are allowed. There is no extra open region tied to C=3.
+The seed controls map sampling. The generator scripts explicitly configure
+geometry, obstacle counts, rewards, and discount.
 
-To enable the transformer, set `checkpoint_path` in the main block of
-`main_robot_2d_online.py` to `robot_2d/saved_results/q_transformer/checkpoint`. The model
-loads once and is shared across trials and methods. Programmatic use is:
+Generation solves independent maps in CPU worker processes. Configure
+`n_workers` in the generator script: one is serial; larger values use that many
+processes. At most twice that many maps are pending. The parent generates maps,
+updates progress, and writes the dataset in its original order.
+
+Training keeps all R/C cases of a map in the same batch item, so one BERT forward
+pass serves all its Q-table targets. One epoch visits all training maps and all
+their targets. Batch size now counts maps: 16 per GPU in 2-D and four per GPU in
+3-D, before gradient accumulation. It does not count individual cells or Q-tables.
+Static MDP features are prepared once, sharing radius-dependent features across R
+values. BERT embeddings are recomputed during training because the encoder learns.
+
+The shared defaults are:
+
+| Setting | Value |
+|---|---|
+| Optimizer | AdamW; weight decay 0.01, excluding biases and normalization parameters |
+| BERT peak learning rate | 1e-5 |
+| Decoder peak learning rate | 3e-4 |
+| 3-D position-embedding peak learning rate | 2e-5 |
+| Schedule | 5% linear warmup, then cosine decay to zero |
+| Epoch limit | 100 |
+| Gradient accumulation / clipping | 1 update per batch / norm 1.0 |
+| Split | 90% training maps, 10% validation maps; seed 42 |
+| Validation / saving | Every epoch |
+| Best-model metric | RMSE over nonterminal state-action entries |
+| Early stopping | Patience 10; minimum improvement 1e-5 |
+| Numbered checkpoints retained | Up to five |
+
+Loss is Smooth L1 averaged over nonterminal state-action entries. Validation also
+reports whole-table RMSE, nonterminal MAE, mean per-table maximum error, and the
+largest error. These are computed with terminal rows fixed at zero. The best
+validation model is restored before saving the final predictor.
+
+CUDA uses BF16 when supported, otherwise FP16, with FP32 CPU fallback. On the
+server, use distributed training so each GPU gets its own process:
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 .venv/bin/torchrun --standalone --nproc-per-node=2 \
+  --module robot_3d.train_robot_3d_transformer
+```
+
+Replace `robot_3d` with `robot_2d` for the 2-D example. With the previously tested
+Transformers/Accelerate versions, ordinary Python on multiple GPUs may use
+DataParallel without activating mixed precision; torchrun activates distributed
+mixed precision. A single GPU can run the ordinary Python module command.
+Training entry points clean up the distributed process group when finished.
+
+Data and new models are stored under each example's `saved_results/q_transformer/`:
+
+```text
+q_data_2d.npz or q_data_3d.npz  # Existing maps, R/C, Q labels, and Bellman residuals
+checkpoint/                   # Best model.pt, encoder configuration, and tokenizer
+checkpoint/checkpoint-*/       # Epoch weights, optimizer/scheduler, and Trainer state
+```
+
+Existing weights are not loaded during training. Every invocation starts fresh;
+it does not resume an old optimizer, learning-rate schedule, or Q-transformer.
+Settings are in the training scripts' main blocks. Native Trainer overrides are
+available through the shared trainer's `training_options` argument.
+
+To use the trained model, set the example's `checkpoint_path` to its
+`saved_results/q_transformer/checkpoint` directory. The fixed-R/C 2-D script
+uses this new path by default; set it to None for zero initialization. Programmatic
+use is unchanged:
 
 ```python
 from q_transformer.model import QTransformerPredictor
@@ -415,58 +426,27 @@ predictor = QTransformerPredictor("robot_2d/saved_results/q_transformer/checkpoi
 controller = ConformallyRobustController(mdp, q_initializer=predictor)
 ```
 
-The controller supplies the actual `R_used` and `C_used` before each policy
-computation. Fixed-R/C runs still train once and reuse their policy. The predictor
-returns a NumPy array; the agent and saved results never contain the model.
-Leave `checkpoint_path=None` or omit `q_initializer` for zero initialization.
-Any callable with signature `(mdp, R_used, C_used)` can supply an alternative
-initializer, without changing the agent or importing transformer dependencies.
-
-The fixed-R/C script also uses `q_initializer` and the same configured
-rewards and discount as the dataset generator and online example. Match geometry,
-action ordering, rewards, and discount in generation and deployment configurations.
-The predictor checks the Q-table shape.
-Each checkpoint has a fixed shape; a 3-D example uses the same implementation
-with its own MDP, training configuration, and checkpoint. Training infers state
-and action counts from the Q labels; the checkpoint stores just these dimensions
-alongside its weights and tokenizer settings.
+The predictor uses the same prompt, token alignment, numerical features, and
+terminal mask as training. It returns an (n_states, n_actions) NumPy array.
+The controller supplies R_used and C_used before Algorithm 1. Omitting
+`q_initializer` preserves zero initialization without importing transformer
+dependencies. Match geometry, action ordering, rewards, and discount between
+the dataset and the deployed MDP.
 
 Run `python -m robot_2d.evaluate_robot_2d_transformer` or
-`python -m robot_3d.evaluate_robot_3d_transformer` to evaluate the respective saved
-checkpoint against its dataset. Both use the shared evaluator in
-`q_transformer/evaluate.py`: 10 maps from the original validation split, all 20 R/C
-conditions on each, and one paired solver case per condition across those maps.
-Both starts use the same Bellman tolerance and populated uncertainty cache.
-Timing includes a separate inference measurement; one-time model loading is
-reported separately. Results go to `evaluation.csv`, `evaluation.json`, and
-`prediction_evaluation.png` in each example's `saved_results/q_transformer/`.
-Training and checkpoint files are unchanged.
-
-An MDP participating in transformer training implements `q_transformer_context()`:
-
-```python
-return current_map_text
-```
-
-The method returns the MDP-specific prompt text directly. Anything variable that
-affects Q must appear in the description; fixed settings belong in the example's
-generation and deployment configurations.
-The 2-D description follows the original instruction prompt: grid dimensions,
-a numeric grid (`0 = free space`, `1 = obstacle`), actual start and goal cell
-indices. Grid rows increase in y and columns increase in x. The shared formatter
-adds `### Instruction:`, supplies numeric R/C (including `infinity`), and requests
-the Q-table. Targets remain numeric Q-tables. The unknown deployment disturbance
-law is not an input.
-Training and inference use the same formatter and tokenizer, with fixed-length
-padding and truncation at 512 tokens, matching the original training settings.
-The input length is capped by the encoder context; larger 3-D grids may need a
-longer-context encoder or a compact map description to retain the full prompt.
+`python -m robot_3d.evaluate_robot_3d_transformer` to evaluate the new checkpoint.
+Both use `q_transformer/evaluate.py` on maps from the original validation split.
+They compare prediction errors and zero/warm value-iteration solves at the same
+Bellman tolerance, and report runtime including inference. Results go to
+`evaluation.csv`, `evaluation.json`, and `prediction_evaluation.png` beside the
+dataset. The evaluator does not change datasets or checkpoints.
 
 ## Validation
 
 ```powershell
 python -B -m unittest discover -s tests -v
 python -B -m unittest discover -s robot_2d/tests -v
+python -B -m unittest discover -s robot_3d/tests -v
 ```
 
 Tests cover global discretization, distinct outside cells, cell-distance

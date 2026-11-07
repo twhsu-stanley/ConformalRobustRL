@@ -1,4 +1,4 @@
-"""Train a Q-transformer using the previously saved 2-D dataset."""
+"""Train a fresh cell-wise Q-transformer using the saved 2-D dataset."""
 
 import sys
 from pathlib import Path
@@ -8,59 +8,37 @@ if not __package__:
 
 
 if __name__ == "__main__":
+    from q_transformer.train import train_q_transformer
+    from robot_2d.utils_2d import mdp_from_description
+    import torch
+
     output_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
     dataset_path = output_dir / "q_data_2d.npz"
     checkpoint_path = output_dir / "checkpoint"
     model_name = "bert-base-uncased"
     epochs = 100
-    batch_size = 4
+    batch_size = 16  # Maps per GPU; each map includes all its R/C cases.
     learning_rate = 1e-5
+    head_learning_rate = 3e-4
+    position_learning_rate = None
     validation_fraction = 0.1
     seed = 42
     max_length = 512
+    width = 128
     device = None
-    head_learning_rate = None
-    position_learning_rate = None
-    split_by_map = True
-    padding = "max_length"
     gradient_accumulation_steps = 1
     warmup_ratio = 0.05
-    patience = 5
-    resume_from_checkpoint = None
-    restart_lr_schedule = False
+    patience = 10
 
-    if not dataset_path.is_file():
-        raise FileNotFoundError(
-            f"Dataset not found: {dataset_path}. "
-            "Run python -m robot_2d.generate_robot_2d_q_data first."
+    try:
+        train_q_transformer(
+            dataset_path, checkpoint_path, mdp_from_description, model_name=model_name,
+            epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
+            head_learning_rate=head_learning_rate, position_learning_rate=position_learning_rate,
+            validation_fraction=validation_fraction, seed=seed, max_length=max_length,
+            width=width, device=device, gradient_accumulation_steps=gradient_accumulation_steps,
+            warmup_ratio=warmup_ratio, patience=patience,
         )
-    import torch
-    from transformers import EarlyStoppingCallback
-
-    from q_transformer.train import train_q_transformer
-
-    training_options = {
-        "gradient_accumulation_steps": gradient_accumulation_steps,
-        "warmup_ratio": warmup_ratio,
-        "eval_strategy": "epoch", "save_total_limit": 5,
-        "load_best_model_at_end": True, "metric_for_best_model": "rmse",
-        "greater_is_better": False, "eval_accumulation_steps": 1,
-        "logging_first_step": True,
-        "bf16": torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
-        "tf32": True if torch.cuda.is_available()
-                and torch.cuda.get_device_capability()[0] >= 8 else None,
-    }
-    callbacks = [EarlyStoppingCallback(early_stopping_patience=patience,
-                                       early_stopping_threshold=1e-5)]
-
-    history = train_q_transformer(
-        dataset_path, checkpoint_path, model_name=model_name,
-        epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
-        validation_fraction=validation_fraction, seed=seed, max_length=max_length, device=device,
-        training_options=training_options,
-        head_learning_rate=head_learning_rate, position_learning_rate=position_learning_rate,
-        split_by_map=split_by_map, padding=padding, callbacks=callbacks,
-        resume_from_checkpoint=resume_from_checkpoint, restart_lr_schedule=restart_lr_schedule,
-    )
-    if torch.distributed.is_initialized():
-        torch.distributed.destroy_process_group()
+    finally:
+        if torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()

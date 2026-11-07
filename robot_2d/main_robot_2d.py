@@ -23,7 +23,7 @@ if __name__ == "__main__":
     output_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
 
     checkpoint_path = (
-        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint-562500"
+        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
     )
     q_initializer = None
     if checkpoint_path is not None:

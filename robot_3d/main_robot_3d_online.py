@@ -63,7 +63,7 @@ if __name__ == "__main__":
     q_initializer = None
     if checkpoint_path is not None:
         from q_transformer.model import QTransformerPredictor
-        q_initializer = QTransformerPredictor(checkpoint_path, truncation=False)
+        q_initializer = QTransformerPredictor(checkpoint_path)
 
     if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
         raise ValueError("This shifting-noise experiment requires unit grid cells.")

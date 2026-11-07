@@ -72,6 +72,44 @@ class GridRobotMotionMDP(gym.Env):
             return 0.0
         return float(self.rewards[self.state_index(state), action])
 
+    def q_transformer_features(self, R, C):
+        """Build per-condition cell features from the known MDP, never from Q labels."""
+        R, C = np.broadcast_arrays(np.atleast_1d(R).astype(float), np.atleast_1d(C).astype(float))
+        if R.ndim != 1 or np.any(~np.isfinite(R)) or np.any((R < 0) | (R > 1)):
+            raise ValueError("R must contain probabilities in [0, 1].")
+        if np.any(np.isnan(C)) or np.any(C < 0):
+            raise ValueError("C must contain nonnegative radii, including positive infinity.")
+        scale = np.asarray(self.grid_shape) - 1
+        coordinates = self.states / scale
+        relative_goal = (self.goal_state - self.states) / scale
+        successors = self.nominal_transitions
+        rows = np.ravel_multi_index(
+            tuple(successors[..., axis] for axis in reversed(range(len(scale)))),
+            self.grid_shape[::-1],
+        )
+        nominal_terminal = self.terminal_mask[rows]
+        # Zero at a terminal cell, one elsewhere: the MDP supplies the exact neighborhood.
+        values = np.ones(self.n_state)
+        terminal_nearby = {}
+        for radius in np.unique(C):
+            flags = np.array([
+                self.worst_case_value(tuple(state), float(radius), values) == 0
+                for state in self.states
+            ])
+            terminal_nearby[radius] = flags[rows]
+        normalized_C = np.divide(C, 1 + C, out=np.ones_like(C), where=np.isfinite(C))
+        geometry = np.column_stack((coordinates, relative_goal))
+        local = np.column_stack((nominal_terminal, self.rewards))
+        n_conditions = len(R)
+        parameters = np.broadcast_to(
+            np.column_stack((R, normalized_C))[:, None, :], (n_conditions, self.n_state, 2),
+        )
+        return np.concatenate((
+            np.broadcast_to(geometry, (n_conditions, *geometry.shape)), parameters,
+            np.broadcast_to(local, (n_conditions, *local.shape)),
+            np.stack([terminal_nearby[radius] for radius in C]),
+        ), axis=-1).astype(np.float32)
+
     def reset(self, *, seed=None, options=None):
         """Reset to a nonterminal start; an explicit seed restarts the disturbance RNG."""
         super().reset(seed=seed)

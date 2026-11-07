@@ -11,6 +11,24 @@ import numpy as np
 sys.modules.setdefault("robot_2d.utils", sys.modules[__name__])
 
 
+def mdp_from_description(description):
+    """Reconstruct the unit-cell MDP used by the saved transformer dataset."""
+    from q_transformer.data import parse_grid_description
+    from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+
+    shape, start, goal, obstacles = parse_grid_description(description)
+    if len(shape) != 2:
+        raise ValueError("The 2-D example requires a two-dimensional grid description.")
+    mdp = Robot2DMotionMDP(
+        x_max=float(shape[0]), y_max=float(shape[1]), grid_shape=shape,
+        start_cell=start, goal_cell=goal, gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+        obstacles=obstacles,
+    )
+    if mdp.q_transformer_context() != description:
+        raise ValueError("The reconstructed MDP does not reproduce its saved description.")
+    return mdp
+
+
 def C_star_shift_2d(episode, period=100):
     """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
     if not isinstance(period, (int, np.integer)) or period < 2:

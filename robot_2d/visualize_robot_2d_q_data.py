@@ -2,7 +2,6 @@
 
 from collections import deque
 from pathlib import Path
-import re
 import sys
 
 import matplotlib.pyplot as plt
@@ -12,28 +11,7 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from q_transformer.data import format_prompt
-from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils_2d import plot_robot_motion
-
-
-def _mdp_from_description(description):
-    """Recover the unit-cell map used by generate_robot_2d_q_data."""
-    nx, ny = map(int, re.search(r"size (\d+)x(\d+)", description).groups())
-    endpoints = re.search(
-        r"Start at \((\d+),\s*(\d+)\) and move to the goal state at \((\d+),\s*(\d+)\)",
-        description,
-    )
-    sx, sy, gx, gy = map(int, endpoints.groups())
-    grid = description.split("0 = free space, 1 = obstacle.\n\n", 1)[1].split("Start at", 1)[0]
-    cells = np.fromstring(grid, dtype=int, sep=" ")
-    if cells.size != nx * ny or not np.all(np.isin(cells, (0, 1))):
-        raise ValueError("The saved description must contain a complete binary grid.")
-    obstacles = [tuple(map(int, cell[::-1])) for cell in np.argwhere(cells.reshape(ny, nx))]
-    return Robot2DMotionMDP(
-        x_max=float(nx), y_max=float(ny), grid_shape=(nx, ny),
-        start_cell=(sx, sy), goal_cell=(gx, gy), gamma=0.9,
-        movement_reward=0.0, goal_reward=1.0, obstacles=obstacles,
-    )
+from robot_2d.utils_2d import mdp_from_description, plot_robot_motion
 
 
 def _nominal_policy_trajectory(mdp, Q):
@@ -80,8 +58,9 @@ if __name__ == "__main__":
         description = str(data["descriptions"][data["map_index"][row]])
         Q = data["Q"][row].copy()
         R, C = float(data["R"][row]), float(data["C"][row])
-    print(format_prompt(description, R, C), end="")
-    mdp = _mdp_from_description(description)
+    print(format_prompt(description), end="")
+    print(f"Numerical planning inputs: R={R}, C={C}")
+    mdp = mdp_from_description(description)
     policy, trajectory = _nominal_policy_trajectory(mdp, Q)
     fig = plot_robot_motion(
         mdp, Q, policy, trajectory,

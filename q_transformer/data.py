@@ -5,6 +5,7 @@ from concurrent.futures import ProcessPoolExecutor
 from contextlib import nullcontext
 from multiprocessing import get_context
 from pathlib import Path
+import re
 
 import numpy as np
 from tqdm import tqdm
@@ -12,16 +13,35 @@ from tqdm import tqdm
 from Tabular_Agent import Tabular_Agent
 
 
-def format_prompt(description, R, C):
-    """One format for both training and deployment; R and C are inputs, never labels."""
-    Tabular_Agent._validate_uncertainty(R, C)
-    radius = "infinity" if np.isposinf(C) else repr(float(C))
+def format_prompt(description):
+    """Describe the map once; planning parameters are separate numerical inputs."""
     return (
         "### Instruction:\n"
         f"{description.rstrip()}\n"
-        f"Predict the Q-table for R = {float(R)!r} and C = {radius}.\n"
-        "Do NOT include extra text or explanations.\n\n"
+        "Predict the Q-table.\n"
     )
+
+
+def parse_grid_description(description):
+    """Read a full binary grid in increasing x, then y, then higher dimensions."""
+    shape_match = re.search(r"grid with size (\d+(?:x\d+)+)", description)
+    endpoints = re.search(r"Start at \(([^)]+)\).*goal state at \(([^)]+)\)", description)
+    if shape_match is None or endpoints is None:
+        raise ValueError("The description must specify grid dimensions, start, and goal.")
+    shape = tuple(map(int, shape_match[1].split("x")))
+    start, goal = (tuple(map(int, text.split(","))) for text in endpoints.groups())
+    if len(start) != len(shape) or len(goal) != len(shape):
+        raise ValueError("Start and goal dimensions must match the grid.")
+    marker = "0 = free space, 1 = obstacle.\n\n"
+    if marker not in description:
+        raise ValueError("The description must contain a complete binary grid.")
+    grid = description.split(marker, 1)[1].split("Start at", 1)[0]
+    entries = grid.split()
+    if len(entries) != np.prod(shape) or any(value not in ("0", "1") for value in entries):
+        raise ValueError("The description must contain one binary entry per cell.")
+    cells = np.asarray(entries, dtype=int).reshape(shape[::-1])
+    obstacles = [tuple(map(int, cell[::-1])) for cell in np.argwhere(cells)]
+    return shape, start, goal, obstacles
 
 
 def _solve_map(mdp, conditions, tolerance, max_iterations, progress=None):

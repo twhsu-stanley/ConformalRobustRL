@@ -146,14 +146,13 @@ def _plot_evaluation(records, summary, output_dir):
 
 def evaluate_q_transformer(
     dataset_path, checkpoint_path, mdp_from_description, *, n_maps=10, seed=42,
-    validation_fraction=0.1, tolerance=1e-8, n_workers=2, cpu_threads=4, truncation=False,
+    validation_fraction=0.1, tolerance=1e-8, n_workers=2, cpu_threads=4,
 ):
     """Evaluate held-out Q predictions and balance solver pairs across R/C conditions."""
     import torch
     from tqdm import tqdm
 
-    from q_transformer.data import format_prompt
-    from q_transformer.model import QTransformerPredictor, tokenize_prompts
+    from q_transformer.model import QTransformerPredictor
 
     checkpoint_path = Path(checkpoint_path)
     output_dir = checkpoint_path.parent
@@ -168,7 +167,7 @@ def evaluate_q_transformer(
         selected = np.flatnonzero(np.isin(map_indices, chosen))
         targets = np.asarray(data["Q"][selected], dtype=float)
     start = perf_counter()
-    predictor = QTransformerPredictor(checkpoint_path, truncation=truncation)
+    predictor = QTransformerPredictor(checkpoint_path)
     model_load_seconds = perf_counter() - start
     device = predictor.device
     print(f"Device={device}; maps={len(chosen)}; predictions={len(selected)}; "
@@ -190,17 +189,7 @@ def evaluate_q_transformer(
                     if device.type == "cuda":
                         torch.cuda.synchronize(device)
                     start = perf_counter()
-                    prompt = format_prompt(
-                        str(descriptions[map_index]), levels[index], radii[index],
-                    )
-                    encoded = tokenize_prompts(
-                        predictor.tokenizer, [prompt], predictor.max_length, truncation=truncation,
-                    )
-                    encoded = {key: value.to(device) for key, value in encoded.items()}
-                    with torch.inference_mode():
-                        Q = predictor.model(**encoded)[0].cpu().numpy().astype(float)
-                    if not np.all(np.isfinite(Q)):
-                        raise ValueError("The transformer predicted nonfinite values.")
+                    Q = predictor(mdp, levels[index], radii[index])
                     predictions.append(Q)
                     seconds.append(perf_counter() - start)
                     progress.update(1)
