@@ -48,24 +48,23 @@ if __name__ == "__main__":
         evaluation_return = []
         agents = []
         for trial in range(n_trials):
-            agent = Tabular_Agent(
-                mdp, lr_init=0.5, step_start_decay_lr=10000000,
-                epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
-                R=R, C=C, seed=None if seed is None else seed + trial,
-            )
+            agent = Tabular_Agent(mdp, R=R, C=C)
             initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
             agent.robust_q_learning(
                 max_training_episodes, record_every=1, initial_Q=initial_Q,
                 tolerance=training_tolerance, check_every=training_check_every,
+                lr_init=0.5, step_start_decay_lr=10000000,
+                epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
+                seed=None if seed is None else seed + trial,
             )
             evaluation_return.append(agent.evaluation_return.copy())
             agents.append(agent)
             print(
                 f"Trial {trial + 1}: R={R}, C={C}, "
                 f"V(start)={evaluation_return[-1][-1]:.4f}, "
-                f"training episodes={agent.training_diagnostics['episodes']}, "
-                f"training steps={agent.training_diagnostics['transitions']}, "
-                f"Bellman residual={agent.training_diagnostics['bellman_residual']:.3g}",
+                f"training episodes={agent.diagnostics['episodes']}, "
+                f"training steps={agent.diagnostics['global_steps']}, "
+                f"Bellman residual={agent.diagnostics['bellman_residual']:.3g}",
             )
 
         filename = output_dir / f"robot_3d_R{R}_C{C}.pkl"

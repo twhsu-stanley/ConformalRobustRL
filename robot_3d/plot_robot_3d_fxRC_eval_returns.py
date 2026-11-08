@@ -41,7 +41,12 @@ if __name__ == "__main__":
             axis.fill_between(steps, mean - std, mean + std, color=line.get_color(), alpha=0.2)
             with (data_dir / f"robot_3d_R{R}_C{C}_agents.pkl").open("rb") as file:
                 agents = pickle.load(file)["agents"]
-            totals = [agent.training_diagnostics["transitions"] for agent in agents]
+            totals = []
+            for agent in agents:
+                if hasattr(agent, "diagnostics"):
+                    totals.append(agent.diagnostics["global_steps"])
+                else:  # Read fixed-R,C runs saved before the agent API refactor.
+                    totals.append(agent.training_diagnostics["transitions"])
             position = len(labels)
             labels.append(f"R={R}\nC={C}")
             steps_axis.bar(position, np.mean(totals), color=line.get_color(), alpha=0.7)

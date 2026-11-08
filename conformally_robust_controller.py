@@ -72,7 +72,7 @@ class ConformallyRobustController:
         self.agent = None
         self.Q = None
         self.policy = None
-        self.agent_options = {
+        self.q_learning_options = {
             "lr_init": lr_init,
             "step_start_decay_lr": step_start_decay_lr, "epsilon_init": epsilon_init,
             "epsilon_lb": epsilon_lb, "epsilon_decay_rate": epsilon_decay_rate,
@@ -123,13 +123,11 @@ class ConformallyRobustController:
         Tabular_Agent._validate_uncertainty(R_used, C_used)
         reused = (
             self.fixed_R is not None and self.fixed_C is not None and self.agent is not None
-            and self.agent.training_diagnostics.get("converged", False)
+            and self.agent.diagnostics.get("converged", False)
         )
         if not reused:
-            self.agent = Tabular_Agent(
-                self.training_env, R=R_used, C=C_used, seed=self._next_seed(),
-                **self.agent_options,
-            )
+            training_seed = self._next_seed()
+            self.agent = Tabular_Agent(self.training_env, R=R_used, C=C_used)
             initial_Q = None
             if self.q_initializer is not None:
                 initial_Q = self.q_initializer(self.training_env, R_used, C_used)
@@ -137,12 +135,13 @@ class ConformallyRobustController:
                 self.max_training_episodes, exploring_starts=True, record_every=100,
                 initial_Q=initial_Q,
                 tolerance=self.training_tolerance, check_every=self.training_check_every,
+                seed=training_seed, **self.q_learning_options,
             )
         record = self.deployment_env.deploy_policy(self.policy)
         record.update({
             "episode": len(self.history) + 1, "R_used": R_used,
             "C_used": float(C_used),
-            "training": self.agent.training_diagnostics.copy(), "training_reused": reused,
+            "training": self.agent.diagnostics.copy(), "training_reused": reused,
         })
         if self.fixed_R is None:
             self.transition_count += len(record["actions"])

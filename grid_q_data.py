@@ -176,8 +176,8 @@ def training_maps(mdp, n_maps, *, n_obstacles, seed=7):
     The straight segment between the endpoint centers must hit at least two distinct obstacle cells.
     Requested obstacle counts are sampled within the capacity of the protected map.
     """
-    if not isinstance(n_maps, (int, np.integer)) or n_maps < 2:
-        raise ValueError("n_maps must be an integer of at least two.")
+    if not isinstance(n_maps, (int, np.integer)) or n_maps < 1:
+        raise ValueError("n_maps must be a positive integer.")
     counts = np.asarray(n_obstacles)
     if counts.shape != (2,) or not np.all(np.isfinite(counts)):
         raise ValueError("n_obstacles must contain two finite integer counts.")

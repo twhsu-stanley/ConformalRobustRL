@@ -115,10 +115,21 @@ this is a choice of the nominal model f. During deployment its disturbed outcome
 can still leave the workspace.
 
 Algorithm 1 samples only nominal transitions `s_next = f(s, a)`.
+Construct an agent with `Tabular_Agent(mdp, R=R, C=C)`. R and C default to 0.0
+and may also be passed positionally. These shared problem parameters are fixed
+for that agent; each solver call supplies its own settings.
+Q-learning receives lr_init, step_start_decay_lr, epsilon_init, epsilon_lb,
+epsilon_decay_rate, and seed as method arguments. Its RNG, current epsilon,
+learning rate, and working counters are local to that run. Value iteration needs
+none of these Q-learning settings. Future solvers can follow the same pattern
+without adding algorithm-specific constructor parameters.
 `Tabular_Agent.initialize_q(initial_Q=None)` fills Q with zero by default, or copies
 a supplied finite Q-table. Pass the table through
-`agent.robust_q_learning(..., initial_Q=predicted_Q)`. Terminal rows are zeroed after
-initialization and never receive TD updates. Initial cached values and diagnostics
+`agent.robust_q_learning(..., lr_init=learning_rate, initial_Q=predicted_Q)`.
+Both solvers call `initialize_q(initial_Q)` directly, including when it is None.
+Initialization clears previous diagnostics, curves, and visit counts.
+Terminal rows are zeroed during initialization and never receive TD updates.
+Initial cached values and diagnostics
 are derived from the initialized table. The default case does not import transformer
 libraries or require a checkpoint.
 
@@ -134,8 +145,11 @@ learning rates can hide large Bellman errors.
 
 Value iteration retains `tolerance=1e-8` and `max_iterations=10000` by default.
 It also accepts `initial_Q=predicted_Q`; omitting it preserves zero initialization.
-Each solver records its actual work, residual, tolerance, and `converged` status
-in its diagnostics. Reaching a safety cap without convergence raises an error;
+Each solver records its algorithm, actual work (`global_steps`), residual,
+tolerance, and `converged` status in `agent.diagnostics`. Value iteration also
+records iterations; Q-learning records episodes and visit summaries and retains
+its learning curve and visit-count table. These results always describe the
+latest run, including a run that fails to converge. Reaching a safety cap raises an error;
 the controller does not deploy that policy. Fixed-R,C learning-curve plots keep
 each converged trial at its final value when averaging runs of different lengths.
 
@@ -435,11 +449,22 @@ the dataset and the deployed MDP.
 
 Run `python -m robot_2d.evaluate_robot_2d_transformer` or
 `python -m robot_3d.evaluate_robot_3d_transformer` to evaluate the new checkpoint.
-Both use `q_transformer/evaluate.py` on maps from the original validation split.
-They compare prediction errors and zero/warm value-iteration solves at the same
-Bellman tolerance, and report runtime including inference. Results go to
-`evaluation.csv`, `evaluation.json`, and `prediction_evaluation.png` beside the
-dataset. The evaluator does not change datasets or checkpoints.
+Both use the small comparison helper in `q_transformer/evaluate.py`.
+Set R, C, algorithm (`"robust_value_iteration"` or `"q_learning"`), and tolerance in the
+script's main block. Each run generates one fresh map using the training map
+family. All Q-learning settings are explicitly supplied in the script:
+lr_init, step_start_decay_lr, epsilon_init, epsilon_lb, epsilon_decay_rate, and
+seed are passed to robust_q_learning; the sampled MDP, R, and C construct the
+agent. Both initializations use the same settings. It then
+compares zero initialization against the transformer prediction on
+that same map at the same Bellman-residual tolerance. Set seed to an integer to
+repeat the map; the two Q-learning runs always share a learning RNG seed.
+Only global time-step counts and final residuals are printed. For Q-learning,
+steps are actual training transitions; for value iteration they are individual
+nonterminal state-action updates (sweeps times nonterminal states times actions).
+Residual checks and inference do not enter these counters. Q-learning uses the
+same check_every setting for both runs. No dataset is loaded, no figures or
+evaluation files are saved, and no checkpoint is modified.
 
 ## Validation
 

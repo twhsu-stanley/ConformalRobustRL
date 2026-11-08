@@ -46,12 +46,14 @@ def parse_grid_description(description):
 
 def _solve_map(mdp, conditions, tolerance, max_iterations, progress=None):
     """Solve every R/C combination in one process, reusing the map's uncertainty cache."""
-    agent = Tabular_Agent(mdp, lr_init=0.5)
     targets, residuals = [], []
     for R, C in conditions:
-        Q, _ = agent.value_iteration(R=R, C=C, tolerance=tolerance, max_iterations=max_iterations)
+        agent = Tabular_Agent(mdp, R=R, C=C)
+        Q, _ = agent.robust_value_iteration(
+            tolerance=tolerance, max_iterations=max_iterations,
+        )
         targets.append(Q)
-        residuals.append(agent.value_iteration_diagnostics["bellman_residual"])
+        residuals.append(agent.diagnostics["bellman_residual"])
         if progress is not None:
             progress.update(1)
     return np.asarray(targets), residuals
@@ -139,7 +141,7 @@ def generate_q_data(
 
 
 def split_samples(n_samples, validation_fraction=0.1, seed=42):
-    """Match the original dataset's seeded random split of individual samples."""
+    """Split indices reproducibly into training and validation sets."""
     if not 0 < validation_fraction < 1:
         raise ValueError("validation_fraction must be in (0, 1).")
     if not isinstance(n_samples, (int, np.integer)) or n_samples < 2:
