@@ -450,7 +450,7 @@ the dataset and the deployed MDP.
 Run `python -m robot_2d.evaluate_robot_2d_transformer` or
 `python -m robot_3d.evaluate_robot_3d_transformer` to evaluate the new checkpoint.
 Both use the small comparison helper in `q_transformer/evaluate.py`.
-Set R, C, algorithm (`"robust_value_iteration"` or `"q_learning"`), and tolerance in the
+Set R, C, algorithm (`"robust_value_iteration"` or `"robust_q_learning"`), and tolerance in the
 script's main block. Each run generates one fresh map using the training map
 family. All Q-learning settings are explicitly supplied in the script:
 lr_init, step_start_decay_lr, epsilon_init, epsilon_lb, epsilon_decay_rate, and
@@ -465,6 +465,15 @@ nonterminal state-action updates (sweeps times nonterminal states times actions)
 Residual checks and inference do not enter these counters. Q-learning uses the
 same check_every setting for both runs. No dataset is loaded, no figures or
 evaluation files are saved, and no checkpoint is modified.
+
+The 3-D Q-learning comparison uses R=0.2, C=0.75, lr_init=0.9,
+epsilon_init=0.1, epsilon_lb=0.01, epsilon_decay_rate=0.999, and
+step_start_decay_lr=1000000, with tolerance=1e-3 and check_every=100.
+With the current checkpoint, warm starts reduced training transitions by 30% to
+58% on map seeds 23, 67, and 91. Both initializations reached the full
+Bellman-residual threshold before learning-rate decay began. Exploring starts
+remain enabled to cover all nonterminal state-action pairs. The improvement
+depends on the sampled map and prediction quality.
 
 ## Validation
 

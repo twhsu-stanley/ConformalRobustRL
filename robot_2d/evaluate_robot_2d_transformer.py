@@ -19,7 +19,7 @@ if __name__ == "__main__":
     epsilon_init = 1.0
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
-    algorithm = "robust_value_iteration"  # Or "q_learning".
+    algorithm = "robust_value_iteration"  # Or "robust_q_learning".
     tolerance = 1e-6
     seed = None  # Set an integer to repeat the map and learning RNG seeds.
     n_obstacles = (25, 40)

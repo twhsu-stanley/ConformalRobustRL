@@ -16,12 +16,12 @@ def compare_initializations(
     update per nonterminal state-action pair per sweep. Residual checks and
     transformer inference are excluded from these learning-update counters.
     """
-    if algorithm not in ("robust_value_iteration", "q_learning"):
-        raise ValueError("algorithm must be 'robust_value_iteration' or 'q_learning'.")
+    if algorithm not in ("robust_value_iteration", "robust_q_learning"):
+        raise ValueError("algorithm must be 'robust_value_iteration' or 'robust_q_learning'.")
     from q_transformer.model import QTransformerPredictor
 
     initial_Q = QTransformerPredictor(checkpoint_path)(mdp, R, C)
-    if algorithm == "q_learning" and seed is None:
+    if algorithm == "robust_q_learning" and seed is None:
         seed = int(np.random.default_rng().integers(2**32))
     steps = {}
     print(f"Algorithm={algorithm}, R={R}, C={C}, Bellman tolerance={tolerance:g}")
@@ -29,7 +29,7 @@ def compare_initializations(
         print("Global time steps count individual nonterminal state-action updates.")
     else:
         print(f"Global time steps count training transitions; check_every={check_every} episodes.")
-    for name, Q in (("Zero initialization", None), ("Transformer warm start", initial_Q)):
+    for name, Q in (("Transformer warm start", initial_Q), ("Zero initialization", None)):
         agent = Tabular_Agent(env=mdp, R=R, C=C)
         if algorithm == "robust_value_iteration":
             agent.robust_value_iteration(

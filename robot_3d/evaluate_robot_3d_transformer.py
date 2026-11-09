@@ -14,17 +14,17 @@ from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 if __name__ == "__main__":
     R = 0.2
     C = 0.75
-    lr_init = 0.5
-    step_start_decay_lr = 10000000
-    epsilon_init = 1.0
+    lr_init = 0.9
+    step_start_decay_lr = 1000000
+    epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
-    algorithm = "robust_value_iteration"  # Or "q_learning".
-    tolerance = 1e-6
-    seed = None  # Set an integer to repeat the map and learning RNG seeds.
+    algorithm = "robust_q_learning"  # Or "robust_value_iteration".
+    tolerance = 1e-3
+    seed = 67 # 91
     n_obstacles = (250, 400)
     max_iterations = 10000
-    max_training_episodes = 200000
+    max_training_episodes = 100000
     check_every = 100
     checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
 
