@@ -316,25 +316,28 @@ Importing a script does not run experiments. Transformer code is shared in
 
 - `data.py` generates robust value-iteration Q labels, formats map prompts, parses
   binary-grid descriptions, and provides seeded map-level splitting.
-- `model.py` combines a BERT embedding for each grid cell with explicit numerical
-  MDP features. A width-128 decoder shared across cells predicts that cell's action
-  values. Terminal outputs are exactly zero.
-- `train.py` trains the encoder and decoder jointly from the original pretrained
-  BERT weights and a new decoder. Existing Q-transformer checkpoints are never
-  loaded. The 3-D encoder extends BERT's original 512 position embeddings to 1536,
+- `model.py` predicts Q-values directly from each cell's contextual BERT embedding.
+  A non-affine LayerNorm and shared MLP map 768 to 128 to 128 to the action count,
+  with GELU after the first two linear layers. There are no auxiliary feature
+  heads, numerical feature inputs, or separate CLS/R/C readout branches. Terminal
+  outputs remain exactly zero.
+- `train.py` trains the encoder and Q head jointly from the original pretrained
+  BERT weights and a new head. Existing Q-transformer checkpoints are never
+  loaded. The 3-D encoder extends BERT's original 512 position embeddings to 2048,
   randomly initializes the extra positions, and trains all positions.
-- The robot MDP supplies `q_transformer_features(R, C)`. Inputs are normalized
-  state coordinates, normalized goal displacement, R, C/(1+C), nominal-successor
-  terminal indicators, rewards, and localized-uncertainty terminal indicators.
-  Infinite C is encoded as one; the MDP still uses the original radius for its
-  uncertainty sets, including outside terminal cells. This gives 18 features per
-  2-D cell and 26 per 3-D cell. Features never use Q labels or unknown disturbances.
 
-The text prompt contains the full binary grid and start/goal coordinates, followed
-by "Predict the Q-table." R and C are numerical inputs. A fast tokenizer aligns
-each grid entry with exactly one BERT token in Q-table row order. Both examples
-reject overlong prompts; neither truncates grid cells. Token capacities are 512
-for 2-D and 1536 for 3-D, with padding to the longest complete prompt.
+The prompt states R and C once as global parameters applying to every cell and
+action. It notes that, for a fixed MDP, increasing either uncertainty parameter
+with the other held fixed cannot increase any optimal Q(s,a). This is textual
+guidance; the network has no additional monotonicity loss or hard constraint.
+The prompt includes the full binary grid, column indices, explicit row/layer
+indices, start/goal coordinates, cell widths, nominal motion, rewards, discount,
+and the local-neighborhood rule. A fast tokenizer aligns each binary grid entry
+with exactly one BERT token in Q-table row order, skipping coordinate labels.
+The cell-to-token correspondence remains deterministic. Both examples reject
+overlong prompts; neither truncates grid cells. Token capacities are 512 for 2-D
+and 2048 for 3-D. Complete 10x10 and 10x10x10 prompts typically use approximately
+368 and 1680 tokens, respectively, depending on numerical formatting.
 
 Generate a dataset once, then train from its saved file:
 
@@ -372,12 +375,13 @@ Generation solves independent maps in CPU worker processes. Configure
 processes. At most twice that many maps are pending. The parent generates maps,
 updates progress, and writes the dataset in its original order.
 
-Training keeps all R/C cases of a map in the same batch item, so one BERT forward
-pass serves all its Q-table targets. One epoch visits all training maps and all
-their targets. Batch size now counts maps: 16 per GPU in 2-D and four per GPU in
-3-D, before gradient accumulation. It does not count individual cells or Q-tables.
-Static MDP features are prepared once, sharing radius-dependent features across R
-values. BERT embeddings are recomputed during training because the encoder learns.
+Each training item is one map/R/C prompt and its target Q-table.
+All cases belonging to a map stay together in the 90/10 map split; conditions of
+a validation map cannot appear in training. One epoch visits all training
+map/R/C cases. Batch size counts conditional prompts: 16 per GPU in 2-D and four
+per GPU in 3-D, before gradient accumulation. The text is tokenized in bounded
+per-map groups, and terminal masks are stored once per map. Each parameter pair
+requires its own BERT encoding.
 
 The shared defaults are:
 
@@ -385,7 +389,7 @@ The shared defaults are:
 |---|---|
 | Optimizer | AdamW; weight decay 0.01, excluding biases and normalization parameters |
 | BERT peak learning rate | 1e-5 |
-| Decoder peak learning rate | 3e-4 |
+| Q head's peak learning rate | 3e-4 |
 | 3-D position-embedding peak learning rate | 2e-5 |
 | Schedule | 5% linear warmup, then cosine decay to zero |
 | Epoch limit | 100 |
@@ -396,10 +400,12 @@ The shared defaults are:
 | Early stopping | Patience 10; minimum improvement 1e-5 |
 | Numbered checkpoints retained | Up to five |
 
-Loss is Smooth L1 averaged over nonterminal state-action entries. Validation also
-reports whole-table RMSE, nonterminal MAE, mean per-table maximum error, and the
-largest error. These are computed with terminal rows fixed at zero. The best
-validation model is restored before saving the final predictor.
+The printed loss is Smooth L1 (Huber with beta=1), averaged over nonterminal
+state-action entries. There is no auxiliary loss or feature-target generation.
+Validation reports nonterminal Q RMSE, whole-table RMSE, nonterminal MAE, mean
+per-table maximum error, and the largest Q error.
+Q errors use terminal rows fixed at zero. The best Q-RMSE validation model is
+restored before saving the final predictor.
 
 CUDA uses BF16 when supported, otherwise FP16, with FP32 CPU fallback. On the
 server, use distributed training so each GPU gets its own process:
@@ -425,6 +431,9 @@ checkpoint/checkpoint-*/       # Epoch weights, optimizer/scheduler, and Trainer
 
 Existing weights are not loaded during training. Every invocation starts fresh;
 it does not resume an old optimizer, learning-rate schedule, or Q-transformer.
+Previous numerical-input and auxiliary-feature checkpoints are incompatible with
+the Q-only `text_cell_q` architecture and must be retrained. Existing checkpoint
+files are not changed until a training run writes its outputs.
 Settings are in the training scripts' main blocks. Native Trainer overrides are
 available through the shared trainer's `training_options` argument.
 
@@ -440,8 +449,9 @@ predictor = QTransformerPredictor("robot_2d/saved_results/q_transformer/checkpoi
 controller = ConformallyRobustController(mdp, q_initializer=predictor)
 ```
 
-The predictor uses the same prompt, token alignment, numerical features, and
-terminal mask as training. It returns an (n_states, n_actions) NumPy array.
+The predictor uses the same conditional prompt, token alignment, and terminal
+mask as training. It returns an (n_states, n_actions) NumPy Q-table directly:
+(100, 4) for the 2-D grid and (1000, 6) for the 3-D grid.
 The controller supplies R_used and C_used before Algorithm 1. Omitting
 `q_initializer` preserves zero initialization without importing transformer
 dependencies. Match geometry, action ordering, rewards, and discount between
@@ -469,8 +479,10 @@ evaluation files are saved, and no checkpoint is modified.
 The 3-D Q-learning comparison uses R=0.2, C=0.75, lr_init=0.9,
 epsilon_init=0.1, epsilon_lb=0.01, epsilon_decay_rate=0.999, and
 step_start_decay_lr=1000000, with tolerance=1e-3 and check_every=100.
-With the current checkpoint, warm starts reduced training transitions by 30% to
-58% on map seeds 23, 67, and 91. Both initializations reached the full
+With the previous numerical-input checkpoint, warm starts reduced training
+transitions by 30% to 58% on map seeds 23, 67, and 91. Those historical results
+must be re-evaluated after training the text-only model. Both initializations
+reached the full
 Bellman-residual threshold before learning-rate decay began. Exploring starts
 remain enabled to cover all nonterminal state-action pairs. The improvement
 depends on the sampled map and prediction quality.

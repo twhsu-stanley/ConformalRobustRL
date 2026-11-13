@@ -13,13 +13,66 @@ from tqdm import tqdm
 from Tabular_Agent import Tabular_Agent
 
 
-def format_prompt(description):
-    """Describe the map once; planning parameters are separate numerical inputs."""
-    return (
-        "### Instruction:\n"
-        f"{description.rstrip()}\n"
-        "Predict the Q-table.\n"
-    )
+def format_prompt(mdp, R, C):
+    """Describe a grid task with global R/C and explicit indices, entirely as text."""
+    Tabular_Agent._validate_uncertainty(R, C)
+    base = mdp.unwrapped
+    shape = base.grid_shape
+    if len(shape) not in (2, 3):
+        raise ValueError("Grid prompts require a two- or three-dimensional workspace.")
+    radius = "infinity" if np.isinf(C) else repr(float(C))
+    dimensions = "x".join(map(str, shape))
+    axes = "Columns increase in x; rows increase in y."
+    if len(shape) == 3:
+        axes += " Layers increase in z."
+    lines = [
+        "### Instruction:",
+        f"Predict the Q-table for a grid with size {dimensions}.",
+        f"Uncertainty parameters: R = {float(R)!r}; C = {radius}.",
+        "The same R and C apply to every cell and action.",
+        "For a fixed MDP, increasing R or C with the other held fixed cannot increase "
+        "any optimal Q(s,a).",
+        f"Cell widths: {tuple(map(float, base.cell_widths))}. Indices start at zero.",
+        axes,
+        f"Action columns: {', '.join(base.ACTION_NAMES)}.",
+        "Nominal actions move one cell; outward commands stay in the current cell.",
+        f"Rewards: goal command {base.goal_reward!r}; free-cell command "
+        f"{base.movement_reward!r}; obstacle/boundary command 0. Terminal rewards are 0.",
+        f"Discount: {base.gamma!r}. Goal, obstacle, and outside cells have zero values.",
+        "Local cells have Euclidean point-to-cell distance from the nominal successor "
+        "center at most C. Mix the nominal next value and the local minimum "
+        "with weights 1-R and R.",
+        "Columns x: " + " ".join(map(str, range(shape[0]))),
+        "0 = free space, 1 = obstacle.\n",
+    ]
+    layers = base.obstacle_mask[None] if len(shape) == 2 else base.obstacle_mask
+    for z, layer in enumerate(layers):
+        if len(shape) == 3:
+            lines.append(f"z={z}")
+        for y, row in enumerate(layer):
+            lines.append(f"y={y}: " + " ".join(map(str, row.astype(int))))
+    start, goal = tuple(map(int, base.start_state)), tuple(map(int, base.goal_state))
+    lines.append(f"Start at {start} and move to the goal state at {goal}.")
+    return "\n".join(lines) + "\n"
+
+
+def grid_cell_spans(text):
+    """Locate only binary cell characters, excluding legends and coordinate labels."""
+    marker = "0 = free space, 1 = obstacle.\n\n"
+    start = text.index(marker) + len(marker)
+    end = text.index("Start at", start)
+    spans, offset = [], start
+    for line in text[start:end].splitlines(keepends=True):
+        if line.strip() and not re.fullmatch(r"\s*z=\d+\s*", line):
+            label = re.match(r"\s*y=\d+:\s*", line)
+            begin = label.end() if label else 0
+            cells = line[begin:]
+            if not re.fullmatch(r"\s*[01](?:\s+[01])*\s*", cells):
+                raise ValueError("Each grid row must contain space-separated binary cells.")
+            spans.extend((offset + begin + m.start(), offset + begin + m.end())
+                         for m in re.finditer(r"[01]", cells))
+        offset += len(line)
+    return spans
 
 
 def parse_grid_description(description):
@@ -32,12 +85,8 @@ def parse_grid_description(description):
     start, goal = (tuple(map(int, text.split(","))) for text in endpoints.groups())
     if len(start) != len(shape) or len(goal) != len(shape):
         raise ValueError("Start and goal dimensions must match the grid.")
-    marker = "0 = free space, 1 = obstacle.\n\n"
-    if marker not in description:
-        raise ValueError("The description must contain a complete binary grid.")
-    grid = description.split(marker, 1)[1].split("Start at", 1)[0]
-    entries = grid.split()
-    if len(entries) != np.prod(shape) or any(value not in ("0", "1") for value in entries):
+    entries = [description[a:b] for a, b in grid_cell_spans(description)]
+    if len(entries) != np.prod(shape):
         raise ValueError("The description must contain one binary entry per cell.")
     cells = np.asarray(entries, dtype=int).reshape(shape[::-1])
     obstacles = [tuple(map(int, cell[::-1])) for cell in np.argwhere(cells)]

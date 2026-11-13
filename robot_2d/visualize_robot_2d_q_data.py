@@ -58,9 +58,8 @@ if __name__ == "__main__":
         description = str(data["descriptions"][data["map_index"][row]])
         Q = data["Q"][row].copy()
         R, C = float(data["R"][row]), float(data["C"][row])
-    print(format_prompt(description), end="")
-    print(f"Numerical planning inputs: R={R}, C={C}")
     mdp = mdp_from_description(description)
+    print(format_prompt(mdp, R, C), end="")
     policy, trajectory = _nominal_policy_trajectory(mdp, Q)
     fig = plot_robot_motion(
         mdp, Q, policy, trajectory,

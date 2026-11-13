@@ -1,4 +1,4 @@
-"""Train a fresh cell-wise Q-transformer using the saved 2-D dataset."""
+"""Train a text-only Q-transformer from the saved 2-D Q-table data."""
 
 import sys
 from pathlib import Path
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     checkpoint_path = output_dir / "checkpoint"
     model_name = "bert-base-uncased"
     epochs = 100
-    batch_size = 16  # Maps per GPU; each map includes all its R/C cases.
+    batch_size = 16  # Map/R/C prompts per GPU.
     learning_rate = 1e-5
     head_learning_rate = 3e-4
     position_learning_rate = None

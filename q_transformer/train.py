@@ -1,4 +1,4 @@
-"""Joint training of a fresh pretrained BERT encoder and a shared cell decoder."""
+"""Train BERT and a shared cell-wise Q head from conditional text prompts."""
 
 from pathlib import Path
 
@@ -14,7 +14,7 @@ from q_transformer.model import QValueTransformer, extend_bert_positions, tokeni
 
 
 class _MapDataset(Dataset):
-    """One map per item, with all its R/C labels and no duplicated BERT inputs."""
+    """One map/R/C prompt and Q-table per item, with a shared terminal mask per map."""
 
     def __init__(self, path, mdp_from_description, tokenizer, max_length, show_progress):
         with np.load(path, allow_pickle=False) as data:
@@ -38,19 +38,12 @@ class _MapDataset(Dataset):
             raise ValueError("Training and validation require at least two distinct maps.")
         self.n_states, self.n_actions = targets.shape[1:]
         self.targets = torch.from_numpy(targets)
-        self.levels = torch.as_tensor(levels, dtype=torch.float32)
-        self.rows, self.features, self.radius_indices, self.terminal = [], [], [], []
-        prompts = [format_prompt(str(descriptions[index])) for index in self.maps]
-        self.encoded = tokenize_prompts(tokenizer, prompts, max_length, self.n_states)
-        conditions = None
-        for map_index in tqdm(self.maps, desc="Preparing map features", disable=not show_progress):
+        self.rows, self.terminal = [], []
+        self.map_indices, encoded_maps = [], []
+        for map_index in tqdm(
+            self.maps, desc="Preparing text and targets", disable=not show_progress,
+        ):
             rows = np.flatnonzero(map_indices == map_index)
-            current = list(zip(levels[rows].tolist(), radii[rows].tolist()))
-            if len(set(current)) != len(current) or (
-                conditions is not None and current != conditions
-            ):
-                raise ValueError("All maps must contain the same ordered, distinct R/C conditions.")
-            conditions = current
             description = str(descriptions[map_index])
             mdp = mdp_from_description(description)
             if mdp.q_transformer_context() != description:
@@ -59,32 +52,36 @@ class _MapDataset(Dataset):
                 raise ValueError("Every map must match the Q-label dimensions.")
             if np.any(targets[rows][:, mdp.terminal_mask] != 0):
                 raise ValueError("Saved terminal Q-values must be exactly zero.")
-            unique_C, inverse = np.unique(radii[rows], return_inverse=True)
-            features = mdp.q_transformer_features(np.zeros(len(unique_C)), unique_C)
-            self.rows.append(torch.from_numpy(rows))
-            self.features.append(torch.from_numpy(features))
-            self.radius_indices.append(torch.from_numpy(inverse))
+            prompts = [format_prompt(mdp, levels[row], radii[row]) for row in rows]
+            encoded_maps.append(tokenize_prompts(tokenizer, prompts, max_length, self.n_states))
+            self.map_indices.extend([len(self.terminal)] * len(rows))
+            self.rows.extend(rows)
             self.terminal.append(torch.from_numpy(mdp.terminal_mask.copy()))
-        self.numeric_width = self.features[0].shape[-1]
-        self.R_column = 2 * len(mdp.grid_shape)
-        self.n_conditions = len(conditions)
+        self.rows = np.asarray(self.rows)
+        self.map_indices = np.asarray(self.map_indices)
+        padded_length = max(item["input_ids"].shape[1] for item in encoded_maps)
+        self.encoded = {}
+        for key in encoded_maps[0]:
+            tensors = [item[key] for item in encoded_maps]
+            if key != "cell_positions":
+                value = tokenizer.pad_token_id if key == "input_ids" else 0
+                tensors = [torch.nn.functional.pad(t, (0, padded_length - t.shape[1]), value=value)
+                           for t in tensors]
+            self.encoded[key] = torch.cat(tensors)
 
     def __len__(self):
-        return len(self.maps)
+        return len(self.rows)
 
     def __getitem__(self, index):
-        rows = self.rows[index]
-        features = self.features[index][self.radius_indices[index]]
-        features[..., self.R_column] = self.levels[rows, None]
+        row, map_index = self.rows[index], self.map_indices[index]
         return {
             **{key: value[index] for key, value in self.encoded.items()},
-            "features": features, "terminal_mask": self.terminal[index],
-            "labels": self.targets[rows],
+            "terminal_mask": self.terminal[map_index], "labels": self.targets[row],
         }
 
 
 class _QTrainer(Trainer):
-    """Save the cell decoder in the same format used by the Algorithm 1 predictor."""
+    """Save the Q-only model in the same format used by the Algorithm 1 predictor."""
 
     def _save(self, output_dir=None, state_dict=None):
         training = {
@@ -105,17 +102,16 @@ class _QTrainer(Trainer):
 
 
 def _q_error_summaries(logits, labels):
-    """Gather sufficient statistics per map, preserving nonterminal entry counts."""
+    """Gather small per-table Q statistics instead of full distributed predictions."""
     targets, terminal = labels
     errors = logits.float() - targets.float()
-    active = (~terminal[:, None, :, None]).expand_as(errors)
+    active = (~terminal[..., None]).expand_as(errors)
     absolute = errors.abs()
     maximum = absolute.amax(dim=(-1, -2))
     return torch.stack((
-        (errors.square() * active).sum(dim=(1, 2, 3)),
-        (absolute * active).sum(dim=(1, 2, 3)), active.sum(dim=(1, 2, 3)),
-        torch.full_like(maximum[:, 0], errors[0].numel()), maximum.sum(1),
-        torch.full_like(maximum[:, 0], errors.shape[1]), maximum.amax(1),
+        (errors.square() * active).sum(dim=(1, 2)),
+        (absolute * active).sum(dim=(1, 2)), active.sum(dim=(1, 2)),
+        torch.full_like(maximum, errors[0].numel()), maximum,
     ), dim=1)
 
 
@@ -125,8 +121,8 @@ def _q_metrics(prediction):
     return {
         "rmse": float(np.sqrt(total[0] / total[2])),
         "whole_rmse": float(np.sqrt(total[0] / total[3])),
-        "mae": float(total[1] / total[2]), "mean_max_error": float(total[4] / total[5]),
-        "max_error": float(errors[:, 6].max()),
+        "mae": float(total[1] / total[2]), "mean_max_error": float(errors[:, 4].mean()),
+        "max_error": float(errors[:, 4].max()),
     }
 
 
@@ -153,9 +149,9 @@ def train_q_transformer(
     width=128, device=None, gradient_accumulation_steps=1, warmup_ratio=0.05, patience=10,
     training_options=None,
 ):
-    """Start fresh from pretrained BERT; one batch item contains a map's R/C cases.
+    """Start fresh from pretrained BERT; one batch item is one map/R/C prompt.
 
-    Both encoder and decoder learn jointly. Existing Q-transformer checkpoints are
+    The encoder and Q head learn jointly. Existing Q-transformer checkpoints are
     never loaded. The map-level split is seeded; targets and map generation remain
     unchanged. CUDA uses BF16 when supported, otherwise FP16; CPU uses FP32.
     training_options overrides native TrainingArguments without duplicating example code.
@@ -211,10 +207,10 @@ def train_q_transformer(
         dataset_path, mdp_from_description, tokenizer, max_length,
         show_progress=arguments.process_index == 0,
     )
-    training, validation = split_samples(len(dataset), validation_fraction, seed)
-    model = QValueTransformer(
-        encoder, dataset.n_states, dataset.n_actions, dataset.numeric_width, width,
-    )
+    training_maps, validation_maps = split_samples(len(dataset.maps), validation_fraction, seed)
+    training = np.flatnonzero(np.isin(dataset.map_indices, training_maps))
+    validation = np.flatnonzero(np.isin(dataset.map_indices, validation_maps))
+    model = QValueTransformer(encoder, dataset.n_states, dataset.n_actions, width)
     trainer = _QTrainer(
         model=model, args=arguments, train_dataset=Subset(dataset, training),
         eval_dataset=Subset(dataset, validation), processing_class=tokenizer,
@@ -231,11 +227,12 @@ def train_q_transformer(
         batch = arguments.train_batch_size * arguments.world_size
         batch *= arguments.gradient_accumulation_steps
         print(f"Training on {arguments.device}; configured precision={precision}.")
-        print(f"Effective batch={batch} maps, each with {dataset.n_conditions} R/C cases.")
-        print(f"Training={len(training)} maps; validation={len(validation)} maps; "
-              f"Q-table targets={len(dataset.targets)}.")
+        print(f"Effective batch={batch} map/R/C prompts.")
+        print(f"Training={len(training)} prompts from {len(training_maps)} maps; "
+              f"validation={len(validation)} prompts from {len(validation_maps)} maps.")
         print(f"Token length={dataset.encoded['input_ids'].shape[1]}; capacity={max_length}.")
-        print("Fresh BERT initialization; trainable cell decoder; warmup then cosine decay.")
+        print("Loss = Huber over nonterminal Q entries.")
+        print("Fresh pretrained BERT; text-only inference; warmup then cosine decay.")
     trainer.train()
     trainer.save_model(str(checkpoint_path))
     return trainer.state.log_history
