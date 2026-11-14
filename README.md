@@ -370,30 +370,6 @@ dataset. Dataset generation does not import PyTorch or Transformers. Generation
 uses robust value iteration on nominal deterministic transitions, with zero
 terminal values and a Bellman-residual stopping tolerance.
 
-For old description-based copies, run this one-time conversion from the repository
-root. These settings are the original settings of the existing datasets:
-
-```python
-from q_transformer.convert_q_data import convert_q_data
-from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-
-convert_q_data(
-    "robot_2d/saved_results/q_transformer/q_data_2d.npz", Robot2DMotionMDP,
-    bounds=(10., 10.), gamma=.9, movement_reward=0., goal_reward=1.,
-)
-convert_q_data(
-    "robot_3d/saved_results/q_transformer/q_data_3d.npz", Robot3DMotionMDP,
-    bounds=(10., 10., 10.), gamma=.9, movement_reward=0., goal_reward=1.,
-)
-```
-
-Conversion verifies reconstructed maps, every conditional prompt, and the original
-record-array bytes before atomically replacing each file at the same path. It
-leaves already-converted files alone. No maps or Q-labels are regenerated, and no
-checkpoint changes or retraining are needed. Legacy prose parsing exists only in
-the conversion utility; normal generation and training use the structured format.
-
 Each generator uses 2,000 maps and all 20 R/C combinations per map, producing
 40,000 target Q-tables. Both use `R_values=(0,0.2,0.4,0.5)`. The 2-D radii are
 `(0,0.5,0.75,1.5,2)`; the 3-D radii are `(0,0.5,0.75,1,2)`.
