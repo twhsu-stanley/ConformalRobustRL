@@ -11,7 +11,7 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from conformally_robust_controller import ConformallyRobustController
-from grid_q_data import training_maps
+from generate_grid_maps import training_maps
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 from robot_3d.utils_3d import sample_wind_deviation, wind_support_3d
 

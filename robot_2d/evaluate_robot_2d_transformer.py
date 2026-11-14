@@ -6,7 +6,7 @@ import sys
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from grid_q_data import training_maps
+from generate_grid_maps import training_maps
 from q_transformer.evaluate import compare_initializations
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 

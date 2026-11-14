@@ -37,7 +37,7 @@ The reward is 1 when a nonterminal state's nominal command targets the goal,
 and 0 otherwise. Methods share the same episode-by-episode disturbance-support
 schedule and use separate random draws.
 
-The 3-D online experiment instead uses one map from `grid_q_data.training_maps`,
+The 3-D online experiment instead uses one map from `generate_grid_maps.training_maps`,
 with seed 23 and obstacle-count range 250--400. It has 258 obstacles, start center
 (1.5, 1.5, 1.5), and goal center (8.5, 8.5, 6.5). Its disturbance mixes bounded
 quiet tracking errors with anisotropic Gaussian wind-gust displacements. The

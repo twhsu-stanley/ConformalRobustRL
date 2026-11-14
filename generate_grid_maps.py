@@ -1,4 +1,4 @@
-"""Structured n-dimensional grid maps for robust Q-table datasets."""
+"""Generate seeded 2D and 3D obstacle maps for training and online experiments."""
 
 from collections import deque
 from itertools import product
