@@ -22,7 +22,7 @@ if __name__ == "__main__":
     training_check_every = 1000
     output_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
 
-    checkpoint_path = None  # Set to saved_results/q_transformer/checkpoint after training.
+    checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
     q_initializer = None
     if checkpoint_path is not None:
         from q_transformer.model import QTransformerPredictor
@@ -47,9 +47,9 @@ if __name__ == "__main__":
         )
         evaluation_return = []
         agents = []
+        initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
         for trial in range(n_trials):
             agent = Tabular_Agent(mdp, R=R, C=C)
-            initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
             agent.robust_q_learning(
                 max_training_episodes, record_every=1, initial_Q=initial_Q,
                 tolerance=training_tolerance, check_every=training_check_every,

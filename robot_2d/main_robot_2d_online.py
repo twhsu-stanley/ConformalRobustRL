@@ -61,7 +61,7 @@ if __name__ == "__main__":
     first_trial = 1
     methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
 
-    checkpoint_path = None
+    checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
     q_initializer = None
     if checkpoint_path is not None:
         from q_transformer.model import QTransformerPredictor

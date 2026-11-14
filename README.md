@@ -337,7 +337,7 @@ with exactly one BERT token in Q-table row order, skipping coordinate labels.
 The cell-to-token correspondence remains deterministic. Both examples reject
 overlong prompts; neither truncates grid cells. Token capacities are 512 for 2-D
 and 2048 for 3-D. Complete 10x10 and 10x10x10 prompts typically use approximately
-368 and 1680 tokens, respectively, depending on numerical formatting.
+400 and 1712 tokens, respectively, depending on numerical formatting.
 
 Generate a dataset once, then train from its saved file:
 
@@ -437,10 +437,16 @@ files are not changed until a training run writes its outputs.
 Settings are in the training scripts' main blocks. Native Trainer overrides are
 available through the shared trainer's `training_options` argument.
 
-To use the trained model, set the example's `checkpoint_path` to its
-`saved_results/q_transformer/checkpoint` directory. The fixed-R/C 2-D script
-uses this new path by default; set it to None for zero initialization. Programmatic
-use is unchanged:
+The fixed-R/C and online scripts in both examples use their
+`saved_results/q_transformer/checkpoint` directory by default. Set
+`checkpoint_path = None` for zero initialization. The predictor loads `model.pt`
+directly from the selected directory, or from its sole numbered `checkpoint-*`
+subdirectory. If several numbered checkpoints exist without a root `model.pt`,
+select the intended numbered directory explicitly. No weights are copied.
+The fixed-R/C scripts predict once per map/R/C setting and reuse that initial
+table across trials. Use the evaluation scripts for paired zero/warm-start
+comparisons on the same map; the fixed-R/C scripts save the selected
+initialization's results once per setting. Programmatic use is:
 
 ```python
 from q_transformer.model import QTransformerPredictor

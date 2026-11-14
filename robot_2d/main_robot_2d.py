@@ -22,16 +22,13 @@ if __name__ == "__main__":
     training_check_every = 100
     output_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
 
-    checkpoint_path = (
-        Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
-    )
+    checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
     q_initializer = None
     if checkpoint_path is not None:
         from q_transformer.model import QTransformerPredictor
         q_initializer = QTransformerPredictor(checkpoint_path)
 
     experiments = (
-        (0.0, 1.0, None, 5),
         (0.0, 1.0, q_initializer, 5),
         (0.1, 1.0, q_initializer, n_trials),
         (0.2, 1.0, q_initializer, n_trials),
@@ -50,9 +47,9 @@ if __name__ == "__main__":
         evaluation_return = []
         agents = []
         initializer_type = "zero init" if q_initializer is None else "transformer-based warm start"
+        initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
         for trial in range(n_trials):
             agent = Tabular_Agent(mdp, R=R, C=C)
-            initial_Q = None if q_initializer is None else q_initializer(mdp, R, C)
             agent.initialize_q(initial_Q)
             initial_bellman_error = agent.robust_bellman_residual()
             print(

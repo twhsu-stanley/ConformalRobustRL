@@ -104,6 +104,14 @@ class QTransformerPredictor:
 
     def __init__(self, checkpoint_path, *, device=None):
         path = Path(checkpoint_path)
+        if not (path / "model.pt").is_file():
+            checkpoints = list(path.glob("checkpoint-*/model.pt"))
+            if len(checkpoints) != 1:
+                raise FileNotFoundError(
+                    f"Select a directory containing model.pt. Found {len(checkpoints)} "
+                    f"numbered checkpoints under {path}; choose one explicitly."
+                )
+            path = checkpoints[0].parent
         self.device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
         checkpoint = torch.load(path / "model.pt", map_location="cpu", weights_only=True)
         if checkpoint.get("architecture") != "text_cell_q":
