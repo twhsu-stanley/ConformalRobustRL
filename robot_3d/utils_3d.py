@@ -30,6 +30,38 @@ def sample_deviation(nominal_position, rng, *, radius, R_star):
     return deviation
 
 
+def wind_support_3d(episode, period=100):
+    """Slow wind-intensity cycle; the support remains above the half-cell threshold."""
+    if not isinstance(period, (int, np.integer)) or period < 2:
+        raise ValueError("The distribution-shift period must be an integer of at least 2.")
+    phase = (episode % period + 0.5) / period
+    return float(0.7 + 0.6 * np.cos(np.pi * phase)**2)
+
+
+def sample_wind_deviation(nominal_position, rng, *, radius, R_star):
+    """Bounded integrated wind acceleration with weaker vertical displacement.
+
+    Quiet tracking errors stay inside a radius-0.15 ball. Gust candidates have
+    covariance radius**2 * diag(0.6**2, 0.6**2, 0.2**2), conditioned to leave the
+    nominal unit voxel and stay inside the radius bound. Consequently R_star is
+    exactly the discrete mismatch probability, independent of intensity or state.
+    For a one-second interval, residual acceleration is twice this displacement.
+    """
+    if not np.isfinite(radius) or radius <= 0.5:
+        raise ValueError("The gust support radius must be finite and greater than 0.5.")
+    if not np.isfinite(R_star) or not 0 <= R_star <= 1:
+        raise ValueError("R_star must be in [0, 1].")
+    gust = rng.random() < R_star
+    scales = radius * np.array((0.6, 0.6, 0.2)) if gust else np.array((0.04, 0.04, 0.02))
+    while True:
+        deviation = scales * rng.standard_normal(3)
+        norm = np.linalg.norm(deviation)
+        if gust and norm <= radius and np.max(np.abs(deviation)) > 0.5:
+            return deviation
+        if not gust and norm <= 0.15:
+            return deviation
+
+
 def randomize_obstacles(mdp, rng, n_obstacles=20):
     """Sample obstacle voxels with endpoint clearance and a nominal path to the goal."""
     if not isinstance(n_obstacles, (int, np.integer)) or n_obstacles < 0:

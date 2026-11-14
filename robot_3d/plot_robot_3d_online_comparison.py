@@ -24,6 +24,8 @@ plt.rcParams.update({
     "ytick.labelsize": 14,
     "legend.fontsize": 14,
     "figure.titlesize": 20,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 
@@ -52,11 +54,13 @@ if __name__ == "__main__":
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend()
-        fig.savefig(output_dir / f"{name}.png", dpi=180)
+        for extension in ("png", "pdf"):
+            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)
     for run in runs:
         fig = plot_trajectories(run, METHOD_LABELS[run["method"]])
         name = (f"trajectories_{run['method']}_R{run['fixed_R']}_C{run['fixed_C']}"
                 f"_trial_{run['trial']}")
-        fig.savefig(output_dir / f"{name}.png", dpi=180)
+        for extension in ("png", "pdf"):
+            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)

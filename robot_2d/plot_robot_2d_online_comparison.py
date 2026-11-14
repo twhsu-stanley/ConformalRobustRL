@@ -24,6 +24,8 @@ plt.rcParams.update({
     "ytick.labelsize": 14,
     "legend.fontsize": 14,
     "figure.titlesize": 20,
+    "pdf.fonttype": 42,
+    "ps.fonttype": 42,
 })
 
 
@@ -42,7 +44,9 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"No online comparison results found in {output_dir}.")
     estimated = [run for run in runs if run["fixed_R"] is None]
     calibrated = [run for run in runs if run["fixed_C"] is None]
-    figures = {"policy_comparison": plot_performance(runs, METHOD_LABELS)}
+    figures = {
+        "policy_comparison": plot_performance(runs, METHOD_LABELS, return_ylim=(-0.01, 0.4)),
+    }
     if estimated:
         probabilities = []
         for run in estimated:
@@ -59,11 +63,13 @@ if __name__ == "__main__":
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend()
-        fig.savefig(output_dir / f"{name}.png", dpi=180)
+        for extension in ("png", "pdf"):
+            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)
     for run in runs:
         fig = plot_trajectories(run, METHOD_LABELS[run["method"]])
         name = (f"trajectories_{run['method']}_R{run['fixed_R']}_C{run['fixed_C']}"
                 f"_trial_{run['trial']}")
-        fig.savefig(output_dir / f"{name}.png", dpi=180)
+        for extension in ("png", "pdf"):
+            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)

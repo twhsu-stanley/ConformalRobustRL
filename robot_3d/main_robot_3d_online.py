@@ -11,8 +11,9 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from conformally_robust_controller import ConformallyRobustController
+from grid_q_data import training_maps
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-from robot_3d.utils_3d import C_star_shift_3d, sample_deviation
+from robot_3d.utils_3d import sample_wind_deviation, wind_support_3d
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -23,18 +24,15 @@ METHOD_SETTINGS = {
 
 
 if __name__ == "__main__":
-    mdp = Robot3DMotionMDP(
-        x_max=10.0, y_max=10.0, z_max=10.0, grid_shape=(10, 10, 10),
-        start_cell=(0, 0, 0), goal_cell=(9, 9, 9),
-        gamma=0.9, movement_reward=0.0, goal_reward=1.0,
-        obstacles=[
-            (0, 7, 3), (0, 8, 4), (0, 9, 5), (1, 8, 5), (1, 9, 6), (2, 9, 5),
-            (4, 1, 3), (4, 3, 3), (4, 4, 3), (5, 0, 3), (5, 1, 4), (5, 3, 4),
-            (5, 4, 4), (5, 5, 4), (5, 6, 4), (5, 9, 4), (6, 0, 5), (6, 3, 5),
-            (6, 4, 5), (8, 0, 5), (8, 1, 6), (8, 4, 6), (8, 9, 6), (9, 3, 5),
-            (9, 4, 5), (9, 5, 6), (9, 8, 6), (9, 9, 6),
-        ],
-    )
+    map_seed = 23
+    mdp = next(training_maps(
+        Robot3DMotionMDP(
+            x_max=10.0, y_max=10.0, z_max=10.0, grid_shape=(10, 10, 10),
+            start_cell=(1, 1, 1), goal_cell=(8, 8, 8),
+            gamma=0.9, movement_reward=0.0, goal_reward=1.0,
+        ),
+        1, n_obstacles=(250, 400), seed=map_seed,
+    ))
 
     n_deployment_episodes = 100
     horizon = 100
@@ -50,7 +48,7 @@ if __name__ == "__main__":
     save_plots = False
     R = None
     C = None
-    R_star = 0.4
+    R_star = 0.3
     shift_period = 100
     verbose = True
     training_tolerance = 1e-6
@@ -62,7 +60,9 @@ if __name__ == "__main__":
     checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
     q_initializer = None
     if checkpoint_path is not None:
+        import torch
         from q_transformer.model import QTransformerPredictor
+        torch.set_num_threads(4)
         q_initializer = QTransformerPredictor(checkpoint_path)
 
     if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
@@ -71,10 +71,10 @@ if __name__ == "__main__":
         raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
 
     def prepare_episode(controller, episode):
-        radius = C_star_shift_3d(episode, shift_period)
+        radius = wind_support_3d(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
-            sample_deviation, radius=radius, R_star=R_star,
+            sample_wind_deviation, radius=radius, R_star=R_star,
         )
         controller.deployment_env.is_nominal = False
         return {"C_star_k": radius}
@@ -94,6 +94,7 @@ if __name__ == "__main__":
                 calibration_scores=calibration_scores, calibration_window=calibration_window,
                 pilot_episodes=pilot_episodes, seed=seed, R=fixed_R, C=fixed_C,
                 episode_setup=prepare_episode, q_initializer=q_initializer,
+                accelerated_training=True,
             )
             controller.run(n_deployment_episodes, verbose=verbose)
             deployment_mdp = controller.deployment_env
@@ -101,6 +102,7 @@ if __name__ == "__main__":
                 "method": method, "seed": seed, "trial": trial, "mdp": deployment_mdp,
                 "horizon": horizon,
                 "R_star": R_star, "shift_period": shift_period,
+                "map_seed": map_seed, "disturbance_model": "bounded_integrated_wind",
                 "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
                 "history": controller.history,
                 "Q": controller.Q, "policy": controller.policy,

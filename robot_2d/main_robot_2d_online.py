@@ -64,7 +64,9 @@ if __name__ == "__main__":
     checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
     q_initializer = None
     if checkpoint_path is not None:
+        import torch
         from q_transformer.model import QTransformerPredictor
+        torch.set_num_threads(4)
         q_initializer = QTransformerPredictor(checkpoint_path)
 
     if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
@@ -95,6 +97,7 @@ if __name__ == "__main__":
                 calibration_scores=calibration_scores, calibration_window=calibration_window,
                 pilot_episodes=pilot_episodes, seed=seed, R=fixed_R, C=fixed_C,
                 episode_setup=prepare_episode, q_initializer=q_initializer,
+                accelerated_training=True, step_start_decay_lr=10000000,
             )
             controller.run(n_deployment_episodes, verbose=verbose)
             deployment_mdp = controller.deployment_env

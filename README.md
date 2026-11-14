@@ -37,6 +37,16 @@ The reward is 1 when a nonterminal state's nominal command targets the goal,
 and 0 otherwise. Methods share the same episode-by-episode disturbance-support
 schedule and use separate random draws.
 
+The 3-D online experiment instead uses one map from `grid_q_data.training_maps`,
+with seed 23 and obstacle-count range 250--400. It has 258 obstacles, start center
+(1.5, 1.5, 1.5), and goal center (8.5, 8.5, 6.5). Its disturbance mixes bounded
+quiet tracking errors with anisotropic Gaussian wind-gust displacements. The
+gust component is conditioned to leave the nominal voxel, keeping R_star=0.3
+as its support cycles between 0.7 and 1.3. The 2-D law and R_star=0.4 are unchanged.
+
+Both online scripts use the saved Q-transformer and compiled nominal training.
+Saved runs and figures stay in each example's `saved_results/online/` directory.
+
 | Method | R used for training | C used for training |
 | --- | --- | --- |
 | `proposed` | Cumulative mismatch estimate | Pre-episode ACP radius |
@@ -182,8 +192,15 @@ reward + gamma * ((1-R) * V(nominal_next_state)
 A terminal successor contributes V=0. A time-limit truncation at a nonterminal
 successor retains its continuation value. Exploring starts cycle through shuffled
 nonterminal state-action pairs. The controller uses learning rate 0.5 for the
-first 100,000 training transitions, followed by per-pair harmonic decay, and an
+first 100,000 training transitions by default, followed by per-pair harmonic decay, and an
 epsilon schedule starting at 1.0 with decay 0.995 and floor 0.1.
+Both online entry points extend the initial constant-learning-rate phase to
+10,000,000 transitions so warm-start correction can meet the residual tolerance.
+They set `accelerated_training=True`: `numba_grid_q_learning.py` compiles the nominal
+rollout loop with Numba, retaining the same RNG, updates, episode boundaries,
+and residual checks. Deployment continues through the original environment.
+The ordinary solver remains the default for other callers; enable its compiled
+path with `agent.robust_q_learning(..., accelerated=True)`.
 
 ## Deployment, estimation, and ACP
 
@@ -284,6 +301,8 @@ It writes:
 - `acp_calibration.png`: first-trial scores/radii/support and delta history.
 - `policy_comparison.png`: cumulative mean discounted returns and outcome rates.
 - `trajectories_{method}_R{R}_C{C}_trial_{trial}.png`: all deployment trajectories.
+
+Each figure is also saved as a PDF in that same directory.
 
 The comparison uses the recorded Algorithm 2 episodes, with no additional
 evaluation rollouts. Thin return curves and outcome dots show individual trials.

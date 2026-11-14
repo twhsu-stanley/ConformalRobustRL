@@ -36,7 +36,7 @@ class ConformallyRobustController:
         pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, R=None, C=None,
-        episode_setup=None, q_initializer=None,
+        episode_setup=None, q_initializer=None, accelerated_training=False,
     ):
         Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
         for name, value in (
@@ -77,6 +77,8 @@ class ConformallyRobustController:
             "step_start_decay_lr": step_start_decay_lr, "epsilon_init": epsilon_init,
             "epsilon_lb": epsilon_lb, "epsilon_decay_rate": epsilon_decay_rate,
         }
+        if accelerated_training:
+            self.q_learning_options["accelerated"] = True
         self.acp = None
         self.delta = None
         if self.fixed_C is None:

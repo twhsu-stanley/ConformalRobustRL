@@ -130,6 +130,7 @@ class Tabular_Agent:
         self, max_training_episodes, *, lr_init, step_start_decay_lr=10000, epsilon_init=1.0,
         epsilon_lb=0.01, epsilon_decay_rate=0.999, seed=None, exploring_starts=None,
         record_every=1, verbose=False, initial_Q=None, tolerance=1e-6, check_every=100,
+        accelerated=False,
     ):
         """Algorithm 1, with customizable initialization and a deterministic nominal simulator.
 
@@ -163,6 +164,16 @@ class Tabular_Agent:
                 raise ValueError("Robust Q-learning requires deterministic nominal transitions.")
         if exploring_starts is None:
             exploring_starts = True
+        if accelerated:
+            from numba_grid_q_learning import run_robust_q_learning
+
+            return run_robust_q_learning(
+                self, max_training_episodes, lr_init=lr_init,
+                step_start_decay_lr=step_start_decay_lr, epsilon_init=epsilon_init,
+                epsilon_lb=epsilon_lb, epsilon_decay_rate=epsilon_decay_rate, seed=seed,
+                exploring_starts=exploring_starts, record_every=record_every, initial_Q=initial_Q,
+                tolerance=tolerance, check_every=check_every, verbose=verbose,
+            )
         self.initialize_q(initial_Q)
         rng = np.random.default_rng(seed)
         values = np.max(self.Q, axis=1)

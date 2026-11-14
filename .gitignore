@@ -6,3 +6,5 @@ results/
 Tabular/
 saved_results/
 tests/
+*.png
+*.pdf

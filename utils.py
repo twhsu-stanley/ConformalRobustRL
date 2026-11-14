@@ -126,14 +126,14 @@ def plot_R(runs, R_star=None):
         estimates.append(estimate)
         axis.plot(np.arange(1, len(estimate) + 1), estimate, color="C0", alpha=0.25)
     episodes = np.arange(1, len(estimates[0]) + 1)
-    axis.plot(episodes, np.mean(estimates, axis=0), label=r"Estimated $\hat{R}_k$")
+    axis.plot(episodes, np.mean(estimates, axis=0), label=r"Estimated $\hat{R}_{k+1}$")
     axis.axhline(np.mean(R_star), color="black", linestyle=":", label=r"True $R^\star$")
     axis.set(title="R estimation", xlabel="Deployment episode k", ylabel="Probability")
     return fig
 
 
-def plot_performance(runs, method_labels):
-    """Compare the rewards and outcomes already recorded during online deployment."""
+def plot_performance(runs, method_labels, *, return_ylim=None):
+    """Compare recorded returns and outcomes; optionally zoom returns with a full-range inset."""
     import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
@@ -160,4 +160,15 @@ def plot_performance(runs, method_labels):
     axes[1].set(title="Outcomes across online episodes", ylabel="Episode fraction", ylim=(0, 1.02))
     axes[1].set_xticks(np.arange(len(outcomes)), list(outcomes.values()))
     fig.suptitle("Averaged cumulative returns and success rate")
+    if return_ylim is not None:
+        inset = axes[0].inset_axes([0.25, 0.62, 0.24, 0.30])
+        for line in axes[0].lines:
+            inset.plot(
+                line.get_xdata(), line.get_ydata(), color=line.get_color(),
+                alpha=line.get_alpha(), linewidth=line.get_linewidth(),
+            )
+        inset.set_title("Full range", fontsize=9)
+        inset.tick_params(labelsize=7)
+        inset.grid(alpha=0.2)
+        axes[0].set_ylim(*return_ylim)
     return fig
