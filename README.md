@@ -57,10 +57,10 @@ Saved runs and figures stay in each example's `saved_results/online/` directory.
 The R-contamination baselines use prescribed R values as in Wang and Zou.
 When both R and C are fixed, the controller trains once and reuses the policy.
 Otherwise it recomputes the policy each deployment episode.
-General statistics and plots (`plot_R`, `plot_acp`, `plot_performance`, and
-`plot_conformal_history`) are shared in `utils.py`. Example-specific
-geometry, disturbances, and trajectory plots live in `robot_2d/utils_2d.py` and
-`robot_3d/utils_3d.py`. Each example owns its support schedule through
+General statistics and plots (`plot_R`, `plot_acp`, and `plot_performance`)
+are shared in `utils.py`. Example-specific geometry, disturbances, and trajectory plots
+live in `robot_2d/utils_2d.py` and `robot_3d/utils_3d.py`.
+Each example owns its support schedule through
 `C_star_shift_2d` or `C_star_shift_3d`; their current numerical schedules are unchanged.
 Both robot MDPs inherit common nominal transitions, rewards, reset, collision traversal,
 and deployment bookkeeping from `grid_robot_mdp.py`. Geometry and noise remain in each example.

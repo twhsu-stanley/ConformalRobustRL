@@ -131,12 +131,7 @@ if __name__ == "__main__":
                 import matplotlib
                 matplotlib.use("Agg")
                 from robot_2d.utils_2d import plot_robot_motion
-                from utils import plot_conformal_history
                 import matplotlib.pyplot as plt
-                if controller.fixed_R is None or controller.acp is not None:
-                    fig = plot_conformal_history(controller.history, controller.delta)
-                    fig.savefig(output_dir / f"online_uncertainty_{test_name}.png", dpi=160)
-                    plt.close(fig)
                 fig = plot_robot_motion(
                     deployment_mdp, controller.Q, controller.policy,
                     controller.history[-1]["positions"],

@@ -42,13 +42,17 @@ if __name__ == "__main__":
                 runs.append(pickle.load(file))
     if not runs:
         raise FileNotFoundError(f"No online comparison results found in {output_dir}.")
+    episode_xlim = (0, max(len(run["history"]) for run in runs))
     estimated = [run for run in runs if run["fixed_R"] is None]
     calibrated = [run for run in runs if run["fixed_C"] is None]
-    figures = {"policy_comparison": plot_performance(runs, METHOD_LABELS)}
+    # Set (min, max) limits here; ACP also accepts a dict keyed by subplot index.
+    figures = {
+        "policy_comparison": plot_performance(runs, METHOD_LABELS, xlim=episode_xlim, ylim=(0, 0.2))
+    }
     if estimated:
-        figures["r_estimation"] = plot_R(estimated)
+        figures["r_estimation"] = plot_R(estimated, xlim=episode_xlim, ylim=(0, 0.6))
     if calibrated:
-        figures["acp_calibration"] = plot_acp(calibrated)
+        figures["acp_calibration"] = plot_acp(calibrated, xlim=episode_xlim, ylim=None)
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")
