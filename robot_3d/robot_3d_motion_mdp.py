@@ -157,21 +157,6 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
         self.boundary_commands.fill(False)
         self._build_nominal_model()
 
-    def q_transformer_context(self):
-        """Describe the full grid in Q-table order: increasing z, then y, then x."""
-        grid = "\n\n".join(
-            "\n".join(" ".join(map(str, row.astype(int))) for row in layer)
-            for layer in self.obstacle_mask
-        )
-        return (
-            f"The workspace is a 3D grid with size {self.nx}x{self.ny}x{self.nz}.\n"
-            "Layers increase in z, rows increase in y, and columns increase in x.\n"
-            "0 = free space, 1 = obstacle.\n\n"
-            f"{grid}\n"
-            f"Start at {self.start_state} and move to the goal state at {self.goal_state}.\n"
-            "Goal cell and obstacles have zero Q-values."
-        )
-
     def localized_uncertainty_states(self, nominal_next_state, C):
         """Enumerate the finite-C neighborhood over the global grid, using equation (4)."""
         if not np.isfinite(C) or C < 0:

@@ -9,16 +9,18 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer, EarlyStoppingCallback
 from transformers import Trainer, TrainingArguments, set_seed
 
-from q_transformer.data import format_prompt, split_samples
+from q_transformer.data import MDP_MAP_FIELDS, MDP_SHARED_FIELDS
+from q_transformer.data import format_prompt, mdp_parameters, split_samples
 from q_transformer.model import QValueTransformer, extend_bert_positions, tokenize_prompts
 
 
 class _MapDataset(Dataset):
     """One map/R/C prompt and Q-table per item, with a shared terminal mask per map."""
 
-    def __init__(self, path, mdp_from_description, tokenizer, max_length, show_progress):
+    def __init__(self, path, mdp_class, tokenizer, max_length, show_progress):
         with np.load(path, allow_pickle=False) as data:
-            descriptions, map_indices = data["descriptions"], data["map_index"]
+            parameters = {name: data[name] for name in MDP_SHARED_FIELDS + MDP_MAP_FIELDS}
+            map_indices = data["map_index"]
             levels, radii = data["R"], data["C"]
             targets = np.asarray(data["Q"], dtype=np.float32)
         if (
@@ -28,9 +30,9 @@ class _MapDataset(Dataset):
         ):
             raise ValueError("Every record must have a map index, R, C, and a finite Q-table.")
         if not np.issubdtype(map_indices.dtype, np.integer) or np.any(
-            (map_indices < 0) | (map_indices >= len(descriptions))
+            (map_indices < 0) | (map_indices >= len(parameters["start_states"]))
         ):
-            raise ValueError("Map indices must refer to saved descriptions.")
+            raise ValueError("Map indices must refer to saved MDP parameters.")
         if np.any(~np.isfinite(levels)) or np.any((levels < 0) | (levels > 1)):
             raise ValueError("Every R must be a probability in [0, 1].")
         self.maps = np.unique(map_indices)
@@ -44,10 +46,7 @@ class _MapDataset(Dataset):
             self.maps, desc="Preparing text and targets", disable=not show_progress,
         ):
             rows = np.flatnonzero(map_indices == map_index)
-            description = str(descriptions[map_index])
-            mdp = mdp_from_description(description)
-            if mdp.q_transformer_context() != description:
-                raise ValueError("The reconstructed MDP must reproduce its saved description.")
+            mdp = mdp_class(**mdp_parameters(parameters, map_index))
             if (mdp.n_state, mdp.action_space.n) != (self.n_states, self.n_actions):
                 raise ValueError("Every map must match the Q-label dimensions.")
             if np.any(targets[rows][:, mdp.terminal_mask] != 0):
@@ -143,7 +142,7 @@ def _optimizer_groups(model, trainer, head_learning_rate, position_learning_rate
 
 
 def train_q_transformer(
-    dataset_path, checkpoint_path, mdp_from_description, *, model_name="bert-base-uncased",
+    dataset_path, checkpoint_path, mdp_class, *, model_name="bert-base-uncased",
     epochs=100, batch_size=4, learning_rate=1e-5, head_learning_rate=3e-4,
     position_learning_rate=None, validation_fraction=0.1, seed=42, max_length=512,
     width=128, device=None, gradient_accumulation_steps=1, warmup_ratio=0.05, patience=10,
@@ -204,7 +203,7 @@ def train_q_transformer(
         extend_bert_positions(encoder, max_length)
     tokenizer.model_max_length = max_length
     dataset = _MapDataset(
-        dataset_path, mdp_from_description, tokenizer, max_length,
+        dataset_path, mdp_class, tokenizer, max_length,
         show_progress=arguments.process_index == 0,
     )
     training_maps, validation_maps = split_samples(len(dataset.maps), validation_fraction, seed)

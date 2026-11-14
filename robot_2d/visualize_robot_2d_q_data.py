@@ -10,8 +10,9 @@ import numpy as np
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from q_transformer.data import format_prompt
-from robot_2d.utils_2d import mdp_from_description, plot_robot_motion
+from q_transformer.data import format_prompt, mdp_parameters
+from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+from robot_2d.utils_2d import plot_robot_motion
 
 
 def _nominal_policy_trajectory(mdp, Q):
@@ -55,10 +56,9 @@ if __name__ == "__main__":
         if not isinstance(index, (int, np.integer)) or not 1 <= index <= n_datapoints:
             raise ValueError(f"index must be an integer from 1 to {n_datapoints}.")
         row = index - 1
-        description = str(data["descriptions"][data["map_index"][row]])
+        mdp = Robot2DMotionMDP(**mdp_parameters(data, data["map_index"][row]))
         Q = data["Q"][row].copy()
         R, C = float(data["R"][row]), float(data["C"][row])
-    mdp = mdp_from_description(description)
     print(format_prompt(mdp, R, C), end="")
     policy, trajectory = _nominal_policy_trajectory(mdp, Q)
     fig = plot_robot_motion(

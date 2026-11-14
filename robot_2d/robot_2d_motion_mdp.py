@@ -146,18 +146,6 @@ class Robot2DMotionMDP(GridRobotMotionMDP):
         self.boundary_commands.fill(False)
         self._build_nominal_model()
 
-    def q_transformer_context(self):
-        """Return the numeric grid and navigation instructions for the shared prompt."""
-        grid = "\n".join(" ".join(map(str, row.astype(int))) for row in self.obstacle_mask)
-        return (
-            f"The workspace is a 2D grid with size {self.nx}x{self.ny}.\n"
-            "Rows increase in y and columns increase in x.\n"
-            "0 = free space, 1 = obstacle.\n\n"
-            f"{grid}\n"
-            f"Start at {self.start_state} and move to the goal state at {self.goal_state}.\n"
-            "Goal state and obstacles have zero Q-values."
-        )
-
     def localized_uncertainty_states(self, nominal_next_state, C):
         """Enumerate the finite-C neighborhood over the global grid, using equation (4)."""
         if not np.isfinite(C) or C < 0:

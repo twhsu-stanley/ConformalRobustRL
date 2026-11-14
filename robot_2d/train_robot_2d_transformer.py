@@ -9,7 +9,7 @@ if not __package__:
 
 if __name__ == "__main__":
     from q_transformer.train import train_q_transformer
-    from robot_2d.utils_2d import mdp_from_description
+    from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
     import torch
 
     output_dir = Path(__file__).resolve().parent / "saved_results/q_transformer"
@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     try:
         train_q_transformer(
-            dataset_path, checkpoint_path, mdp_from_description, model_name=model_name,
+            dataset_path, checkpoint_path, Robot2DMotionMDP, model_name=model_name,
             epochs=epochs, batch_size=batch_size, learning_rate=learning_rate,
             head_learning_rate=head_learning_rate, position_learning_rate=position_learning_rate,
             validation_fraction=validation_fraction, seed=seed, max_length=max_length,

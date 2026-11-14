@@ -314,8 +314,9 @@ Executable scripts keep their settings and workflow under `if __name__ == "__mai
 Importing a script does not run experiments. Transformer code is shared in
 `q_transformer/`; it has no imports from the robot examples.
 
-- `data.py` generates robust value-iteration Q labels, formats map prompts, parses
-  binary-grid descriptions, and provides seeded map-level splitting.
+- `data.py` generates robust value-iteration Q labels, stores numeric MDP parameters,
+  formats prompts, and provides seeded map-level splitting. `mdp_data(mdp)` exports
+  parameters; `mdp_parameters(data, map_index)` supplies constructor arguments.
 - `model.py` predicts Q-values directly from each cell's contextual BERT embedding.
   A non-affine LayerNorm and shared MLP map 768 to 128 to 128 to the action count,
   with GELU after the first two linear layers. There are no auxiliary feature
@@ -353,10 +354,45 @@ python -m robot_3d.generate_robot_3d_q_data
 python -m robot_3d.train_robot_3d_transformer
 ```
 
-Existing `q_data_2d.npz` and `q_data_3d.npz` remain valid. No label regeneration is
-required for the new architecture. Dataset generation does not import PyTorch or
-Transformers. Generation uses robust value iteration on nominal deterministic
-transitions, with zero terminal values and a Bellman-residual stopping tolerance.
+Datasets use NumPy arrays without pickle or saved prose descriptions:
+
+| Scope | Fields |
+|---|---|
+| Shared by all maps | `bounds`, `grid_shape`, `gamma`, `movement_reward`, `goal_reward` |
+| One entry per map | `start_states`, `goal_states`, `obstacle_masks` |
+| One entry per Q-table | `map_index`, `R`, `C`, `Q`, `bellman_residual` |
+
+Obstacle masks have shape `(maps, ny, nx)` or `(maps, nz, ny, nx)`. Start and goal
+coordinates use `(x,y)` or `(x,y,z)` cell indices. Training constructs the example's
+MDP class directly from these arrays, then calls the same `format_prompt(mdp,R,C)`
+used at inference. Geometry, rewards, and discount must be consistent within a
+dataset. Dataset generation does not import PyTorch or Transformers. Generation
+uses robust value iteration on nominal deterministic transitions, with zero
+terminal values and a Bellman-residual stopping tolerance.
+
+For old description-based copies, run this one-time conversion from the repository
+root. These settings are the original settings of the existing datasets:
+
+```python
+from q_transformer.convert_q_data import convert_q_data
+from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
+from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
+
+convert_q_data(
+    "robot_2d/saved_results/q_transformer/q_data_2d.npz", Robot2DMotionMDP,
+    bounds=(10., 10.), gamma=.9, movement_reward=0., goal_reward=1.,
+)
+convert_q_data(
+    "robot_3d/saved_results/q_transformer/q_data_3d.npz", Robot3DMotionMDP,
+    bounds=(10., 10., 10.), gamma=.9, movement_reward=0., goal_reward=1.,
+)
+```
+
+Conversion verifies reconstructed maps, every conditional prompt, and the original
+record-array bytes before atomically replacing each file at the same path. It
+leaves already-converted files alone. No maps or Q-labels are regenerated, and no
+checkpoint changes or retraining are needed. Legacy prose parsing exists only in
+the conversion utility; normal generation and training use the structured format.
 
 Each generator uses 2,000 maps and all 20 R/C combinations per map, producing
 40,000 target Q-tables. Both use `R_values=(0,0.2,0.4,0.5)`. The 2-D radii are
