@@ -39,10 +39,15 @@ schedule and use separate random draws.
 
 The 3-D online experiment instead uses one map from `generate_grid_maps.training_maps`,
 with seed 23 and obstacle-count range 250--400. It has 258 obstacles, start center
-(1.5, 1.5, 1.5), and goal center (8.5, 8.5, 6.5). Its disturbance mixes bounded
-quiet tracking errors with anisotropic Gaussian wind-gust displacements. The
-gust component is conditioned to leave the nominal voxel, keeping R_star=0.3
-as its support cycles between 0.7 and 1.3. The 2-D law and R_star=0.4 are unchanged.
+(1.5, 1.5, 1.5), and goal center (8.5, 8.5, 6.5). It runs 20 trials.
+Both examples use the same intermittent disturbance law: zero error with probability
+1-R_star, otherwise a uniform length in [sqrt(d)/2, C_star_k] and a uniform direction.
+Each example has its own outer-radius schedule, varying smoothly between 1.1 and
+1.5 over 100 episodes: a cosine in 2-D and a sine in 3-D.
+The inner radius is the unit cell's half diagonal, so every active disturbance
+changes the discrete successor almost surely. R_star stays fixed at 0.4 in 2-D and
+0.3 in 3-D. The nonzero support is a shell; the length is uniform, rather than
+the shell's area or volume. The 3-D ACP upper quantile endpoint remains infinity.
 
 Both online scripts use the saved Q-transformer and compiled nominal training.
 Saved runs and figures stay in each example's `saved_results/online/` directory.
@@ -58,12 +63,12 @@ The R-contamination baselines use prescribed R values as in Wang and Zou.
 When both R and C are fixed, the controller trains once and reuses the policy.
 Otherwise it recomputes the policy each deployment episode.
 General statistics and plots (`plot_R`, `plot_acp`, and `plot_performance`)
-are shared in `utils.py`. Example-specific geometry, disturbances, and trajectory plots
+are shared in `utils.py`. Example-specific geometry and trajectory plots
 live in `robot_2d/utils_2d.py` and `robot_3d/utils_3d.py`.
-Each example owns its support schedule through
-`C_star_shift_2d` or `C_star_shift_3d`; their current numerical schedules are unchanged.
+Each example owns its schedule in `C_star_shift_2d` or `C_star_shift_3d`.
+The common disturbance sampler lives in `utils.py`.
 Both robot MDPs inherit common nominal transitions, rewards, reset, collision traversal,
-and deployment bookkeeping from `grid_robot_mdp.py`. Geometry and noise remain in each example.
+and deployment bookkeeping from `grid_robot_mdp.py`. Geometry remains in each example.
 
 Every `Robot2DMotionMDP` construction must explicitly specify `x_max`, `y_max`,
 `grid_shape`, `start_cell`, `goal_cell`, `gamma`, `movement_reward`, and
@@ -239,7 +244,9 @@ Pilot episodes use the same scoring routine.
 
 ACP predicts before appending the current score. Its rank is
 `ceil((1-delta_k)*(N+1))`. Nonpositive ranks return zero; ranks above N return
-`quantile_max`, which defaults to 3 in this experiment. Delta is not clipped:
+`quantile_max`: 1.75 in the 2-D experiment and infinity for the 3-D
+experiment. An infinite C uses the global R-contamination Bellman operator at the same R.
+Delta is not clipped:
 
 ```text
 miscoverage = 1{score > C_hat}
@@ -252,22 +259,30 @@ coverage concerns the episode deviation score, rather than navigation success.
 Theorem 3's regret concerns R estimation at the same calibrated C, rather than
 the empirical deployment returns.
 
-## Disturbance distribution and shift
+## Shared 2-D and 3-D disturbance distribution and shift
 
 The unknown simulator law stays fixed within each episode. With zero-based
 episode index j and period P=100:
 
 ```text
-C_star_j = 0.5 + cos(pi*((j % P) + 0.5)/P)**2
+C_star_2d_j = 1.3 + 0.2*cos(2*pi*(j % P)/P)
+C_star_3d_j = 1.3 + 0.2*sin(2*pi*(j % P)/P)
+min_radius = sqrt(d)/2
 ```
 
-This varies smoothly between approximately 0.5 and 1.5. At each transition,
-Delta is zero with probability 1-R_star. Otherwise a signed coordinate direction
-is chosen uniformly and the displacement length is uniform between
-`(0.5+C_star_j)/2` and `C_star_j`. Every nonzero draw leaves the nominal unit
-cell, so the discrete mismatch probability is exactly R_star, set to 0.4 in the
-script. This preserves the paper's common conditional mismatch mean while the
-support changes. The learner is not given the disturbance law or its parameters.
+At each transition, Delta is zero with probability 1-R_star. Otherwise its length
+is uniform on [min_radius, C_star_j] using that example's own schedule.
+A vector of independent standard Gaussian
+coordinates is normalized to obtain a uniform direction on the circle or sphere.
+In 3-D this is equivalent to a uniform azimuth and uniform cosine of the polar angle;
+two uniformly sampled angles would bias the directions toward the poles.
+The nonzero length exceeds the unit cell's half diagonal, sqrt(d)/2, almost surely
+for both d=2 and d=3; equality has probability zero under the continuous radius law.
+Thus the activation probability and discrete mismatch probability
+are both exactly R_star, independent of episode, state, or action.
+The radius C_star_j controls the maximum disturbance size, while R_star controls
+event frequency. This is an idealized model of intermittent motion-execution error.
+The learner is not given the disturbance law or its parameters.
 
 Pilots use schedule indices `-pilot_episodes, ..., -1`; deployment starts at zero.
 The schedule at a deployment index is identical across methods even when pilots
@@ -299,13 +314,14 @@ It writes:
 
 - `r_estimation.png`: cumulative R estimates and the true R_star.
 - `acp_calibration.png`: first-trial scores/radii/support and delta history.
-- `policy_comparison.png`: cumulative mean discounted returns and outcome rates.
-- `trajectories_{method}_R{R}_C{C}_trial_{trial}.png`: all deployment trajectories.
+- `policy_comparison.png`: cumulative mean discounted returns. Goal-reaching,
+  obstacle-hitting, workspace-exit, and timeout rates are printed in the terminal.
+- `trajectories_{method}_R{R}_C{C}_trial_{trial}.png`: 2-D deployment trajectories.
 
 Each figure is also saved as a PDF in that same directory.
 
 The comparison uses the recorded Algorithm 2 episodes, with no additional
-evaluation rollouts. Thin return curves and outcome dots show individual trials.
+evaluation rollouts. Thin return curves show individual trials.
 Single-run plots can also be requested through `main(save_plots=True)`.
 
 **Regenerate saved runs from the previous symbolic-exit formulation before using

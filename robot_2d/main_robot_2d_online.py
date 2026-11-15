@@ -12,7 +12,8 @@ if not __package__:
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils_2d import C_star_shift_2d, sample_deviation
+from robot_2d.utils_2d import C_star_shift_2d
+from utils import sample_deviation
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -46,13 +47,14 @@ if __name__ == "__main__":
     delta_1 = None
     eta = 0.1
     calibration_window = 100
-    quantile_max = 3.0
+    quantile_max = 1.75
     pilot_episodes = 100
     calibration_scores = None
     save_plots = False
     R = None
     C = None
     R_star = 0.4
+    min_radius = np.linalg.norm(mdp.cell_widths) / 2
     shift_period = 100
     verbose = True
     training_tolerance = 1e-6
@@ -78,7 +80,7 @@ if __name__ == "__main__":
         radius = C_star_shift_2d(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
-            sample_deviation, radius=radius, R_star=R_star,
+            sample_deviation, radius=radius, R_star=R_star, min_radius=min_radius,
         )
         controller.deployment_env.is_nominal = False
         return {"C_star_k": radius}
@@ -105,6 +107,7 @@ if __name__ == "__main__":
                 "method": method, "seed": seed, "trial": trial, "mdp": deployment_mdp,
                 "horizon": horizon,
                 "R_star": R_star, "shift_period": shift_period,
+                "min_radius": min_radius,
                 "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
                 "history": controller.history,
                 "Q": controller.Q, "policy": controller.policy,
@@ -116,6 +119,7 @@ if __name__ == "__main__":
                 results.update({
                     "delta": delta, "delta_1": delta_1,
                     "eta": eta, "calibration_window": calibration_window,
+                    "quantile_max": quantile_max,
                     "pilot_scores": controller.pilot_scores,
                     "initial_calibration_scores": controller.initial_calibration_scores,
                     "final_delta": controller.acp.delta_k,

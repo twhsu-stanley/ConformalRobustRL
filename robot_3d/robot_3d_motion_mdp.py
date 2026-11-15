@@ -18,7 +18,8 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
     Every outside cell is a distinct terminal state with implicit value zero.
     gamma defines the discounted objective for learning and deployment returns.
 
-    A custom noise_sampler(nominal_position, rng) returns a bounded 3-D deviation.
+    A custom noise_sampler(nominal_position, rng) returns a finite 3-D deviation.
+    Set noise_radius=np.inf for an unbounded custom disturbance distribution.
     The default sampler mixes zero deviation with uniform noise in a ball.
     Noise is never projected or resampled. Segment contacts stop uncertain rollouts
     at the first terminal cell. Mismatches use the original sampled endpoint.
@@ -61,8 +62,10 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
         if self.goal_reward <= self.movement_reward:
             raise ValueError("goal_reward must exceed movement_reward.")
         self.noise_probability = self._probability(noise_probability, "noise_probability")
-        if not np.isfinite(noise_radius) or noise_radius < 0:
-            raise ValueError("noise_radius must be finite and nonnegative.")
+        if np.isnan(noise_radius) or noise_radius < 0:
+            raise ValueError("noise_radius must be nonnegative, or positive infinity.")
+        if np.isinf(noise_radius) and noise_sampler is None and self.noise_probability > 0:
+            raise ValueError("The default uniform-ball sampler requires a finite noise_radius.")
         if noise_sampler is not None and not callable(noise_sampler):
             raise ValueError("noise_sampler must be callable.")
         self.noise_radius = float(noise_radius)

@@ -12,7 +12,6 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
-from robot_3d.utils_3d import plot_trajectories
 from utils import plot_R, plot_acp, plot_performance
 
 
@@ -33,7 +32,7 @@ METHOD_LABELS = {method: settings[2] for method, settings in METHOD_SETTINGS.ite
 
 
 if __name__ == "__main__":
-    """Read saved runs and plot R, ACP, performance, and all deployment trajectories."""
+    """Read saved runs and plot R, ACP, and performance."""
     output_dir = Path(__file__).resolve().parent / "saved_results/online"
     runs = []
     for method, (R, C, _) in METHOD_SETTINGS.items():
@@ -58,13 +57,6 @@ if __name__ == "__main__":
             axis.grid(alpha=0.25, axis="y")
             if axis.get_legend_handles_labels()[0]:
                 axis.legend()
-        for extension in ("png", "pdf"):
-            fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
-        plt.close(fig)
-    for run in runs:
-        fig = plot_trajectories(run, METHOD_LABELS[run["method"]])
-        name = (f"trajectories_{run['method']}_R{run['fixed_R']}_C{run['fixed_C']}"
-                f"_trial_{run['trial']}")
         for extension in ("png", "pdf"):
             fig.savefig(output_dir / f"{name}.{extension}", dpi=180)
         plt.close(fig)

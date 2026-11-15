@@ -13,7 +13,8 @@ if not __package__:
 from conformally_robust_controller import ConformallyRobustController
 from generate_grid_maps import training_maps
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-from robot_3d.utils_3d import sample_wind_deviation, wind_support_3d
+from robot_3d.utils_3d import C_star_shift_3d
+from utils import sample_deviation
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -42,18 +43,20 @@ if __name__ == "__main__":
     delta_1 = None
     eta = 0.1
     calibration_window = 100
-    quantile_max = 3.0
+    quantile_max = np.inf
     pilot_episodes = 100
     calibration_scores = None
     save_plots = False
     R = None
     C = None
     R_star = 0.3
+    min_radius = np.linalg.norm(mdp.cell_widths) / 2
     shift_period = 100
     verbose = True
     training_tolerance = 1e-6
     training_check_every = 1000
-    seeds = (23, 67, 87, 101, 922)
+    seeds = (23, 67, 87, 101, 922, 1009, 2027, 3037, 4049, 5051,
+             6067, 7079, 8089, 9091, 10093, 11003, 12007, 13001, 14009, 15013)
     first_trial = 1
     methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
 
@@ -71,10 +74,10 @@ if __name__ == "__main__":
         raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
 
     def prepare_episode(controller, episode):
-        radius = wind_support_3d(episode, shift_period)
+        radius = C_star_shift_3d(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
-            sample_wind_deviation, radius=radius, R_star=R_star,
+            sample_deviation, radius=radius, R_star=R_star, min_radius=min_radius,
         )
         controller.deployment_env.is_nominal = False
         return {"C_star_k": radius}
@@ -102,7 +105,8 @@ if __name__ == "__main__":
                 "method": method, "seed": seed, "trial": trial, "mdp": deployment_mdp,
                 "horizon": horizon,
                 "R_star": R_star, "shift_period": shift_period,
-                "map_seed": map_seed, "disturbance_model": "bounded_integrated_wind",
+                "map_seed": map_seed,
+                "min_radius": min_radius,
                 "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
                 "history": controller.history,
                 "Q": controller.Q, "policy": controller.policy,
@@ -114,6 +118,7 @@ if __name__ == "__main__":
                 results.update({
                     "delta": delta, "delta_1": delta_1,
                     "eta": eta, "calibration_window": calibration_window,
+                    "quantile_max": quantile_max,
                     "pilot_scores": controller.pilot_scores,
                     "initial_calibration_scores": controller.initial_calibration_scores,
                     "final_delta": controller.acp.delta_k,

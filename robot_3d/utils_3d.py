@@ -6,60 +6,19 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 
+from utils import sample_deviation
+
 
 # Existing result files store sample_deviation under robot_3d.utils.
 sys.modules.setdefault("robot_3d.utils", sys.modules[__name__])
 
 
 def C_star_shift_3d(episode, period=100):
-    """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
+    """Cycle the 3-D outer radius between 1.1 and 1.5, starting at 1.3."""
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
-    phase = (episode % period + 0.5) / period
-    return float(0.5 + 1.0 * np.cos(np.pi * phase)**2)
-
-
-def sample_deviation(nominal_position, rng, *, radius, R_star):
-    """Mix zero with six axis displacements that always leave the nominal unit voxel."""
-    if rng.random() >= R_star:
-        return np.zeros(3)
-    direction = int(rng.integers(6))
-    magnitude = rng.uniform((0.5 + radius) / 2, radius)
-    deviation = np.zeros(3)
-    deviation[direction // 2] = magnitude if direction % 2 == 0 else -magnitude
-    return deviation
-
-
-def wind_support_3d(episode, period=100):
-    """Slow wind-intensity cycle; the support remains above the half-cell threshold."""
-    if not isinstance(period, (int, np.integer)) or period < 2:
-        raise ValueError("The distribution-shift period must be an integer of at least 2.")
-    phase = (episode % period + 0.5) / period
-    return float(0.7 + 0.6 * np.cos(np.pi * phase)**2)
-
-
-def sample_wind_deviation(nominal_position, rng, *, radius, R_star):
-    """Bounded integrated wind acceleration with weaker vertical displacement.
-
-    Quiet tracking errors stay inside a radius-0.15 ball. Gust candidates have
-    covariance radius**2 * diag(0.6**2, 0.6**2, 0.2**2), conditioned to leave the
-    nominal unit voxel and stay inside the radius bound. Consequently R_star is
-    exactly the discrete mismatch probability, independent of intensity or state.
-    For a one-second interval, residual acceleration is twice this displacement.
-    """
-    if not np.isfinite(radius) or radius <= 0.5:
-        raise ValueError("The gust support radius must be finite and greater than 0.5.")
-    if not np.isfinite(R_star) or not 0 <= R_star <= 1:
-        raise ValueError("R_star must be in [0, 1].")
-    gust = rng.random() < R_star
-    scales = radius * np.array((0.6, 0.6, 0.2)) if gust else np.array((0.04, 0.04, 0.02))
-    while True:
-        deviation = scales * rng.standard_normal(3)
-        norm = np.linalg.norm(deviation)
-        if gust and norm <= radius and np.max(np.abs(deviation)) > 0.5:
-            return deviation
-        if not gust and norm <= 0.15:
-            return deviation
+    phase = 2 * np.pi * (episode % period) / period
+    return float(1.3 + 0.2 * np.sin(phase))
 
 
 def randomize_obstacles(mdp, rng, n_obstacles=20):

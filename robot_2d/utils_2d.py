@@ -6,33 +6,19 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 
+from utils import sample_deviation
+
 
 # Existing result files store sample_deviation under robot_2d.utils.
 sys.modules.setdefault("robot_2d.utils", sys.modules[__name__])
 
 
 def C_star_shift_2d(episode, period=100):
-    """Slowly cycle within [0.5, 1.5], staying strictly above the half-cell threshold."""
+    """Cycle the 2-D outer radius from 1.5 to 1.1 and back over one period."""
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
-    phase = (episode % period + 0.5) / period
-    return float(0.5 + 1.0 * np.cos(np.pi * phase)**2)
-
-
-def sample_deviation(nominal_position, rng, *, radius, R_star):
-    """Mix zero with axis displacements that always leave the nominal unit cell.
-
-    The law ignores nominal_position, so it is the same at every state and action.
-    Every nonzero draw has norm strictly above 0.5 and at most radius. Its support
-    reaches radius, and its mismatch probability is exactly R_star, even at exits.
-    """
-    if rng.random() >= R_star:
-        return np.zeros(2)
-    direction = int(rng.integers(4))
-    magnitude = rng.uniform((0.5 + radius) / 2, radius)
-    deviation = np.zeros(2)
-    deviation[direction // 2] = magnitude if direction % 2 == 0 else -magnitude
-    return deviation
+    phase = 2 * np.pi * (episode % period) / period
+    return float(1.3 + 0.2 * np.cos(phase))
 
 
 def randomize_obstacles(mdp, rng, n_obstacles=10):
