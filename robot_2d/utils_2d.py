@@ -1,16 +1,34 @@
 """Disturbances, map generation, and plots for the 2-D robot example."""
 
 import math
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utils import sample_deviation
 
+def sample_deviation_2d(nominal_position, rng, *, radius, R_star, min_radius=None):
+    """Mix zero error with a uniform length and angle theta in [0, 2*pi).
 
-# Existing result files store sample_deviation under robot_2d.utils.
-sys.modules.setdefault("robot_2d.utils", sys.modules[__name__])
+    The nonzero length is uniform on [min_radius, radius], not over the shell's
+    area. The default inner radius is the unit cell's half diagonal, sqrt(2)/2,
+    so every active disturbance changes the discrete successor almost surely.
+    The law is independent of the nominal position.
+    """
+    if np.shape(nominal_position) != (2,):
+        raise ValueError("The 2-D disturbance requires a 2-D position.")
+    if not np.isfinite(R_star) or not 0 <= R_star <= 1:
+        raise ValueError("R_star must be in [0, 1].")
+    half_diagonal = np.sqrt(2) / 2
+    min_radius = half_diagonal if min_radius is None else min_radius
+    if not np.isfinite(min_radius) or min_radius < half_diagonal:
+        raise ValueError("min_radius must be at least the unit cell's half diagonal.")
+    if not np.isfinite(radius) or radius <= min_radius:
+        raise ValueError("The outer radius must be finite and exceed min_radius.")
+    if rng.random() >= R_star:
+        return np.zeros(2)
+    length = rng.uniform(min_radius, radius)
+    theta = rng.uniform(0, 2 * np.pi)
+    return length * np.array((np.cos(theta), np.sin(theta)))
 
 
 def C_star_shift_2d(episode, period=100):

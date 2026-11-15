@@ -1,37 +1,6 @@
-"""Shared robot disturbances, tabular experiment statistics, and plots."""
+"""Shared tabular experiment statistics and plots."""
 
 import numpy as np
-
-
-def sample_deviation(nominal_position, rng, *, radius, R_star, min_radius=None):
-    """Mix zero error with a uniform length and a uniform direction in 2-D or 3-D.
-
-    The nonzero length is uniform on [min_radius, radius], rather than uniform
-    over the shell's area or volume. Normalizing independent Gaussian coordinates
-    gives a uniform direction. The default inner radius is the unit cell's half
-    diagonal, sqrt(d)/2. A continuous length draw exceeds this bound almost surely,
-    so every active disturbance changes the discrete successor almost surely.
-    Only the dimension of nominal_position is used; the law is source-independent.
-    """
-    dimension = len(nominal_position)
-    if dimension not in (2, 3):
-        raise ValueError("The robot disturbance requires a 2-D or 3-D position.")
-    if not np.isfinite(R_star) or not 0 <= R_star <= 1:
-        raise ValueError("R_star must be in [0, 1].")
-    half_diagonal = np.sqrt(dimension) / 2
-    min_radius = half_diagonal if min_radius is None else min_radius
-    if not np.isfinite(min_radius) or min_radius < half_diagonal:
-        raise ValueError("min_radius must be at least the unit cell's half diagonal.")
-    if not np.isfinite(radius) or radius <= min_radius:
-        raise ValueError("The outer radius must be finite and exceed min_radius.")
-    if rng.random() >= R_star:
-        return np.zeros(dimension)
-    direction = rng.normal(size=dimension)
-    length = np.linalg.norm(direction)
-    while length == 0:
-        direction = rng.normal(size=dimension)
-        length = np.linalg.norm(direction)
-    return rng.uniform(min_radius, radius) * direction / length
 
 
 def calc_evaluation_return_mean_std(evaluation_return):

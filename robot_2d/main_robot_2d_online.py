@@ -12,8 +12,7 @@ if not __package__:
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils_2d import C_star_shift_2d
-from utils import sample_deviation
+from robot_2d.utils_2d import C_star_shift_2d, sample_deviation_2d
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -59,7 +58,8 @@ if __name__ == "__main__":
     verbose = True
     training_tolerance = 1e-6
     training_check_every = 100
-    seeds = (23, 67, 87, 101, 922)
+    seeds = (23, 67, 87, 101, 922, 1009, 2027, 3037, 4049, 5051,
+             6067, 7079, 8089, 9091, 10093)
     first_trial = 1
     methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
 
@@ -80,7 +80,7 @@ if __name__ == "__main__":
         radius = C_star_shift_2d(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
-            sample_deviation, radius=radius, R_star=R_star, min_radius=min_radius,
+            sample_deviation_2d, radius=radius, R_star=R_star, min_radius=min_radius,
         )
         controller.deployment_env.is_nominal = False
         return {"C_star_k": radius}

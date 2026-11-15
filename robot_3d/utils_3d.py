@@ -1,24 +1,44 @@
 """Map generation, disturbances, and plots for the 3-D robot example."""
 
-
-import sys
-
 import matplotlib.pyplot as plt
 import numpy as np
 
-from utils import sample_deviation
 
+def sample_deviation_3d(nominal_position, rng, *, radius, R_star, min_radius=None):
+    """Mix zero error with a uniform length and a uniform direction on the sphere.
 
-# Existing result files store sample_deviation under robot_3d.utils.
-sys.modules.setdefault("robot_3d.utils", sys.modules[__name__])
+    Sample theta uniformly on [0, 2*pi) and z uniformly on [-1, 1] independently.
+    The direction is (sqrt(1-z**2)*cos(theta), sqrt(1-z**2)*sin(theta), z).
+    The nonzero length is uniform on [min_radius, radius], not over the shell's
+    volume. The default inner radius is the unit cell's half diagonal, sqrt(3)/2,
+    so every active disturbance changes the discrete successor almost surely.
+    The law is independent of the nominal position.
+    """
+    if np.shape(nominal_position) != (3,):
+        raise ValueError("The 3-D disturbance requires a 3-D position.")
+    if not np.isfinite(R_star) or not 0 <= R_star <= 1:
+        raise ValueError("R_star must be in [0, 1].")
+    half_diagonal = np.sqrt(3) / 2
+    min_radius = half_diagonal if min_radius is None else min_radius
+    if not np.isfinite(min_radius) or min_radius < half_diagonal:
+        raise ValueError("min_radius must be at least the unit cell's half diagonal.")
+    if not np.isfinite(radius) or radius <= min_radius:
+        raise ValueError("The outer radius must be finite and exceed min_radius.")
+    if rng.random() >= R_star:
+        return np.zeros(3)
+    length = rng.uniform(min_radius, radius)
+    theta = rng.uniform(0, 2 * np.pi)
+    z = rng.uniform(-1, 1)
+    xy = np.sqrt(1 - z**2)
+    return length * np.array((xy * np.cos(theta), xy * np.sin(theta), z))
 
 
 def C_star_shift_3d(episode, period=100):
-    """Cycle the 3-D outer radius between 1.1 and 1.5, starting at 1.3."""
+    """Cycle the 3-D outer radius between 0.95 and 1.25, starting at 1.25."""
     if not isinstance(period, (int, np.integer)) or period < 2:
         raise ValueError("The distribution-shift period must be an integer of at least 2.")
     phase = 2 * np.pi * (episode % period) / period
-    return float(1.3 + 0.2 * np.sin(phase))
+    return float(1.1 + 0.15 * np.cos(phase))
 
 
 def randomize_obstacles(mdp, rng, n_obstacles=20):

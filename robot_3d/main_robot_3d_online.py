@@ -13,8 +13,7 @@ if not __package__:
 from conformally_robust_controller import ConformallyRobustController
 from generate_grid_maps import training_maps
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
-from robot_3d.utils_3d import C_star_shift_3d
-from utils import sample_deviation
+from robot_3d.utils_3d import C_star_shift_3d, sample_deviation_3d
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -25,14 +24,14 @@ METHOD_SETTINGS = {
 
 
 if __name__ == "__main__":
-    map_seed = 23
+    map_seed = 178
     mdp = next(training_maps(
         Robot3DMotionMDP(
             x_max=10.0, y_max=10.0, z_max=10.0, grid_shape=(10, 10, 10),
             start_cell=(1, 1, 1), goal_cell=(8, 8, 8),
             gamma=0.9, movement_reward=0.0, goal_reward=1.0,
         ),
-        1, n_obstacles=(250, 400), seed=map_seed,
+        1, n_obstacles=(200, 400), seed=map_seed,
     ))
 
     n_deployment_episodes = 100
@@ -56,7 +55,7 @@ if __name__ == "__main__":
     training_tolerance = 1e-6
     training_check_every = 1000
     seeds = (23, 67, 87, 101, 922, 1009, 2027, 3037, 4049, 5051,
-             6067, 7079, 8089, 9091, 10093, 11003, 12007, 13001, 14009, 15013)
+             6067, 7079, 8089, 9091, 10093)
     first_trial = 1
     methods = ("proposed", "nominal", "R_contamination_0.1", "R_contamination_0.5")
 
@@ -77,7 +76,7 @@ if __name__ == "__main__":
         radius = C_star_shift_3d(episode, shift_period)
         controller.deployment_env.noise_radius = radius
         controller.deployment_env.noise_sampler = partial(
-            sample_deviation, radius=radius, R_star=R_star, min_radius=min_radius,
+            sample_deviation_3d, radius=radius, R_star=R_star, min_radius=min_radius,
         )
         controller.deployment_env.is_nominal = False
         return {"C_star_k": radius}
