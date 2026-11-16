@@ -15,6 +15,7 @@ from Tabular_Agent import Tabular_Agent
 
 MDP_SHARED_FIELDS = ("bounds", "grid_shape", "gamma", "movement_reward", "goal_reward")
 MDP_MAP_FIELDS = ("start_states", "goal_states", "obstacle_masks")
+PROMPT_DECIMALS = 2
 
 
 def mdp_data(mdp):
@@ -51,13 +52,17 @@ def mdp_parameters(data, map_index):
 
 
 def format_prompt(mdp, R, C):
-    """Describe a grid task with global R/C and explicit indices, entirely as text."""
+    """Describe a grid task using the same fixed-precision text in training and inference.
+
+    Only the prompt rounds R and finite C; solvers retain their original values.
+    """
     Tabular_Agent._validate_uncertainty(R, C)
     base = mdp.unwrapped
     shape = base.grid_shape
     if len(shape) not in (2, 3):
         raise ValueError("Grid prompts require a two- or three-dimensional workspace.")
-    radius = "infinity" if np.isinf(C) else repr(float(C))
+    level = f"{max(0.0, float(R)):.{PROMPT_DECIMALS}f}"
+    radius = "infinity" if np.isinf(C) else f"{max(0.0, float(C)):.{PROMPT_DECIMALS}f}"
     dimensions = "x".join(map(str, shape))
     axes = "Columns increase in x; rows increase in y."
     if len(shape) == 3:
@@ -65,7 +70,7 @@ def format_prompt(mdp, R, C):
     lines = [
         "### Instruction:",
         f"Predict the Q-table for a grid with size {dimensions}.",
-        f"Uncertainty parameters: R = {float(R)!r}; C = {radius}.",
+        f"Uncertainty parameters: R = {level}; C = {radius}.",
         "The same R and C apply to every cell and action.",
         "For a fixed MDP, increasing R or C with the other held fixed cannot increase "
         "any optimal Q(s,a).",

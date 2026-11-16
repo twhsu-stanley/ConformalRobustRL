@@ -7,7 +7,7 @@ import torch
 from torch import nn
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
-from q_transformer.data import format_prompt, grid_cell_spans
+from q_transformer.data import PROMPT_DECIMALS, format_prompt, grid_cell_spans
 
 
 def extend_bert_positions(encoder, max_length):
@@ -96,6 +96,7 @@ class QValueTransformer(nn.Module):
             "Q_shape": (self.n_states, self.n_actions),
             "state_dict": {key: value.detach().cpu() for key, value in self.state_dict().items()},
             "max_length": max_length, "training": training,
+            "prompt_decimals": PROMPT_DECIMALS,
         }, path / "model.pt")
 
 
