@@ -168,9 +168,9 @@ def plot_initialization_comparison(results):
     """Show paired errors and convergence work; points below the diagonal favor warm start."""
     import matplotlib.pyplot as plt
 
-    figure, axes = plt.subplots(1, 3, figsize=(13, 4), constrained_layout=True)
-    for axis, metric, title in zip(axes, (*ERROR_METRICS, "global_steps"),
-                                   ("Initial Q max error", "Initial Q RMSE", "Convergence steps")):
+    figure, axes = plt.subplots(1, 2, figsize=(8, 4), constrained_layout=True)
+    for axis, metric, title in zip(axes, ("initial_error_rmse", "global_steps"),
+                                   ("RMSE(Q_init, Q*)", "Total Steps to Convergence")):
         cases = results["cases"]
         if metric == "global_steps":
             cases = [c for c in cases if c["zero"]["converged"] and c["warm"]["converged"]]
