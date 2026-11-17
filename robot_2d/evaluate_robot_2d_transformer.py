@@ -17,7 +17,7 @@ if __name__ == "__main__":
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
-    algorithm = "robust_q_learning" #"robust_value_iteration" # Or 
+    algorithm = "robust_q_learning" # "robust_value_iteration" #
     tolerance = 1e-4
     reference_tolerance = 1e-10
     seed = 168  # Set None for new random cases on each run.

@@ -11,13 +11,13 @@ from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 
 
 if __name__ == "__main__":
-    n_cases = 10
+    n_cases = 100
     lr_init = 0.9
     step_start_decay_lr = 1000000
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
-    algorithm = "robust_q_learning"  # Or "robust_value_iteration".
+    algorithm = "robust_q_learning" # Or "robust_value_iteration" #
     tolerance = 1e-3
     reference_tolerance = 1e-10
     seed = 2026  # Set None for new random cases on each run.
