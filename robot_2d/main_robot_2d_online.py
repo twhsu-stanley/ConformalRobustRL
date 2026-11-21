@@ -41,6 +41,11 @@ if __name__ == "__main__":
     n_deployment_episodes = 100
     horizon = 100
     max_training_episodes = 20000
+    lr_init = 0.5
+    step_start_decay_lr = 10000000
+    epsilon_init = 0.1
+    epsilon_lb = 0.01
+    epsilon_decay_rate = 0.999
     R_hat_init = 0.1
     delta = 0.1
     delta_1 = None
@@ -90,11 +95,14 @@ if __name__ == "__main__":
                 mdp, horizon=horizon, training_horizon=horizon,
                 max_training_episodes=max_training_episodes, R_hat_init=R_hat_init,
                 training_tolerance=training_tolerance, training_check_every=training_check_every,
+                lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
+                epsilon_init=epsilon_init, epsilon_lb=epsilon_lb,
+                epsilon_decay_rate=epsilon_decay_rate,
                 delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
                 calibration_scores=calibration_scores, calibration_window=calibration_window,
                 pilot_episodes=pilot_episodes, seed=seed, R=fixed_R, C=fixed_C,
                 q_initializer=q_initializer,
-                accelerated_training=True, step_start_decay_lr=10000000,
+                accelerated_training=True,
             )
             controller.run(n_deployment_episodes, verbose=verbose)
             deployment_mdp = controller.deployment_env
