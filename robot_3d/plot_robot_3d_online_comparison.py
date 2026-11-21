@@ -41,14 +41,16 @@ if __name__ == "__main__":
     episode_xlim = (0, max(len(run["history"]) for run in runs))
     estimated = [run for run in runs if run["fixed_R"] is None]
     calibrated = [run for run in runs if run["fixed_C"] is None]
-    # Set (min, max) limits here; ACP also accepts a dict keyed by subplot index.
+    # Set limits here; for ACP, dict keys 0/1 select the coverage/delta figures.
     figures = {
         "policy_comparison": plot_performance(runs, METHOD_LABELS, xlim=episode_xlim, ylim=(0, 0.2))
     }
     if estimated:
         figures["r_estimation"] = plot_R(estimated, xlim=episode_xlim, ylim=(0, 0.6))
     if calibrated:
-        figures["acp_calibration"] = plot_acp(calibrated, xlim=episode_xlim, ylim=None)
+        figures["acp_coverage"], figures["acp_delta_k"] = plot_acp(
+            calibrated, xlim=episode_xlim, ylim=None,
+        )
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")

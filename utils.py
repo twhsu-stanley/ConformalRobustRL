@@ -83,7 +83,7 @@ def print_online_summary(runs, method_labels):
               f"initial estimate={estimated[0]['history'][0]['R_used']:g}")
 
 def _set_plot_limits(axes, *, xlim=None, ylim=None):
-    """Set optional limits; dict keys select zero-based subplot indices."""
+    """Set optional limits; dict keys select zero-based axes."""
     for index, axis in enumerate(np.atleast_1d(axes).flat):
         x_limits = xlim.get(index) if isinstance(xlim, dict) else xlim
         y_limits = ylim.get(index) if isinstance(ylim, dict) else ylim
@@ -94,37 +94,38 @@ def _set_plot_limits(axes, *, xlim=None, ylim=None):
 
 
 def plot_acp(runs, *, xlim=None, ylim=None):
-    """Show episode scores, radii, and adaptive delta for the first trial."""
+    """Return independent coverage and adaptive-delta figures for the first trial."""
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(2, 1, figsize=(10, 10), constrained_layout=True)
+    coverage, coverage_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
+    delta, delta_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     run = runs[0]
     history = run["history"]
     episodes = np.arange(1, len(history) + 1)
     radii = np.asarray([row["C_hat"] for row in history])
     scores = np.asarray([row["score"] for row in history], dtype=float)
-    axes[0].plot(episodes, scores, ".", label="nonconformity scores")
-    axes[0].plot(
+    coverage_axis.plot(episodes, scores, ".", label="nonconformity scores")
+    coverage_axis.plot(
         episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$",
     )
     finite_radii = radii[np.isfinite(radii)]
     ceiling = 1.1 * max(1, np.nanmax(scores, initial=0), np.max(finite_radii, initial=0))
     unbounded = np.isposinf(radii)
     if np.any(unbounded):
-        axes[0].scatter(
+        coverage_axis.scatter(
             episodes[unbounded], np.full(sum(unbounded), ceiling), marker="^",
             label=r"$\hat{C}_k=\infty$",
         )
-    axes[0].set(title="Scores and predictions, first trial",
-                xlabel="Deployment episode k", ylabel="Distance")
+    coverage_axis.set(title="Scores and predictions, first trial",
+                      xlabel="Deployment episode k", ylabel="Distance")
 
-    axes[1].plot(episodes, [row["delta_k"] for row in history], label=r"$\delta_k$")
-    axes[1].axhline(run["delta"], color="black", linestyle="--", label=r"Target $\delta$")
-    axes[1].set(title="Adaptive failure parameter, first trial",
-                    xlabel="Deployment episode k", ylabel="Failure parameter")
+    delta_axis.plot(episodes, [row["delta_k"] for row in history], label=r"$\delta_k$")
+    delta_axis.axhline(run["delta"], color="black", linestyle="--", label=r"Target $\delta$")
+    delta_axis.set(title="Adaptive failure parameter, first trial",
+                   xlabel="Deployment episode k", ylabel="Failure parameter")
 
-    _set_plot_limits(axes, xlim=xlim, ylim=ylim)
-    return fig
+    _set_plot_limits((coverage_axis, delta_axis), xlim=xlim, ylim=ylim)
+    return coverage, delta
 
 
 def plot_R(runs, R_star=None, *, xlim=None, ylim=None):
