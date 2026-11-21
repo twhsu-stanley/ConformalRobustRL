@@ -1,4 +1,4 @@
-"""Map generation, disturbances, and plots for the 3-D robot example."""
+"""Disturbances and plots for the 3-D robot example."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -39,28 +39,6 @@ def gaussian_directional_variance_3d(R_star, weights, cell_widths=(1., 1., 1.)):
     tail = -np.expm1(weights * np.log1p(-R_star))
     standard_deviations = (widths / 2) / -ndtri(tail / 2)
     return standard_deviations**2
-
-
-def randomize_obstacles(mdp, rng, n_obstacles=20):
-    """Sample obstacle voxels with endpoint clearance and a nominal path to the goal."""
-    if not isinstance(n_obstacles, (int, np.integer)) or n_obstacles < 0:
-        raise ValueError("n_obstacles must be a nonnegative integer.")
-    candidates = [
-        tuple(cell) for cell in mdp.states
-        if all(np.max(np.abs(cell - endpoint)) >= 2
-               for endpoint in (mdp.start_state, mdp.goal_state))
-    ]
-    if len(candidates) < n_obstacles:
-        raise ValueError(f"The grid has too few eligible cells for {n_obstacles} obstacles.")
-    for _ in range(1000):
-        indices = rng.choice(len(candidates), size=n_obstacles, replace=False)
-        obstacles = [candidates[index] for index in indices]
-        try:
-            mdp.set_obstacles(obstacles)
-        except ValueError:
-            continue
-        return obstacles
-    raise ValueError(f"Could not sample a {n_obstacles}-obstacle map with a start-to-goal path.")
 
 
 def plot_robot_map(mdp, axis):
@@ -148,30 +126,4 @@ def plot_robot_3d_tabular(mdp, agent, *, z_layers=None, show=True):
     fig.suptitle(f"Robust Q-learning: R={agent.R}, C={agent.C}")
     if show:
         plt.show()
-    return fig
-
-
-def plot_trajectories(run, method_label):
-    """Overlay every recorded deployment episode on its trial's fixed obstacle map."""
-    mdp, history = run["mdp"], run["history"]
-    if not history:
-        raise ValueError("At least one deployment episode is required for plotting.")
-    fig = plt.figure(figsize=(9, 8), constrained_layout=True)
-    axis = fig.add_subplot(projection="3d")
-    plot_robot_map(mdp, axis)
-    cmap = plt.get_cmap("viridis")
-    norm = plt.Normalize(vmin=0.5, vmax=len(history) + 0.5)
-    trajectories = [np.asarray(row["positions"]) for row in history]
-    for episode, trajectory in enumerate(trajectories, 1):
-        axis.plot(*trajectory.T, color=cmap(norm(episode)),
-                  linewidth=1, alpha=0.5, marker=".", markersize=3)
-    positions = np.concatenate(trajectories)
-    lo = np.minimum(positions.min(axis=0), 0) - 0.2 * mdp.cell_widths
-    hi = np.maximum(positions.max(axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
-    axis.set(xlim=(lo[0], hi[0]), ylim=(lo[1], hi[1]), zlim=(lo[2], hi[2]))
-    ticks = np.unique(np.linspace(1, len(history), min(6, len(history)), dtype=int))
-    fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
-                 ticks=ticks, label="Deployment episode")
-    axis.set_title(f"{method_label}, trial {run['trial']}\n"
-                   f"{len(history)} deployment trajectories")
     return fig

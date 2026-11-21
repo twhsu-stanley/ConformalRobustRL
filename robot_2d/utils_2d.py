@@ -1,4 +1,4 @@
-"""Disturbances, map generation, and plots for the 2-D robot example."""
+"""Disturbances and plots for the 2-D robot example."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,29 +35,6 @@ def sample_deviation_2d(nominal_position, rng, *, radius, R_star, min_radius=Non
     mode = rng.choice(ndr, p=weights)
     theta = (centers[mode] + alpha * (rng.random() - rng.random())) % (2 * np.pi)
     return length * np.array((np.cos(theta), np.sin(theta)))
-
-
-def randomize_obstacles(mdp, rng, n_obstacles=10):
-    """Place ten obstacles at least two cell indices from start and goal, with a path."""
-    candidates = [
-        (ix, iy) for iy in range(mdp.ny) for ix in range(mdp.nx)
-        if all(max(abs(ix - sx), abs(iy - sy)) >= 2
-               for sx, sy in (mdp.start_state, mdp.goal_state))
-    ]
-    if len(candidates) < n_obstacles:
-        raise ValueError(f"The grid has too few eligible cells for {n_obstacles} obstacles.")
-    previous = set(map(tuple, np.argwhere(mdp.obstacle_mask)[:, ::-1]))
-    for _ in range(1000):
-        indices = rng.choice(len(candidates), size=n_obstacles, replace=False)
-        obstacles = [candidates[index] for index in indices]
-        if set(obstacles) == previous:
-            continue
-        try:
-            mdp.set_obstacles(obstacles)
-        except ValueError:
-            continue
-        return obstacles
-    raise ValueError(f"Could not sample a {n_obstacles}-obstacle map with a start-to-goal path.")
 
 
 def plot_robot_map(mdp, axis):

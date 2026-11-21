@@ -107,17 +107,8 @@ def plot_acp(runs, *, xlim=None, ylim=None):
     axes[0].plot(
         episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$",
     )
-    support_bounds = run.get("C_star")
-    if support_bounds is None and "C_star_k" in history[0]:
-        support_bounds = [row["C_star_k"] for row in history]
-    if support_bounds is not None:
-        axes[0].plot(episodes, np.broadcast_to(support_bounds, episodes.shape), "k:",
-                     label=r"True support bound $C^\star$")
     finite_radii = radii[np.isfinite(radii)]
-    ceiling = max(1, np.nanmax(scores, initial=0), np.max(finite_radii, initial=0))
-    if support_bounds is not None:
-        ceiling = max(ceiling, np.max(support_bounds))
-    ceiling *= 1.1
+    ceiling = 1.1 * max(1, np.nanmax(scores, initial=0), np.max(finite_radii, initial=0))
     unbounded = np.isposinf(radii)
     if np.any(unbounded):
         axes[0].scatter(
