@@ -12,7 +12,7 @@ if not __package__:
 
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
-from robot_2d.utils_2d import C_star_shift_2d, sample_deviation_2d
+from robot_2d.utils_2d import sample_deviation_2d
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -44,7 +44,7 @@ if __name__ == "__main__":
     R_hat_init = 0.1
     delta = 0.1
     delta_1 = None
-    eta = 0.1
+    eta = 0.02
     calibration_window = 100
     quantile_max = 1.75
     pilot_episodes = 100
@@ -53,8 +53,8 @@ if __name__ == "__main__":
     R = None
     C = None
     R_star = 0.4
+    C_star = 1.3
     min_radius = np.linalg.norm(mdp.cell_widths) / 2
-    shift_period = 100
     verbose = True
     training_tolerance = 1e-6
     training_check_every = 100
@@ -72,18 +72,13 @@ if __name__ == "__main__":
         q_initializer = QTransformerPredictor(checkpoint_path)
 
     if not np.allclose(mdp.cell_widths, 1.0, rtol=0, atol=1e-12):
-        raise ValueError("This shifting-noise experiment requires unit grid cells.")
+        raise ValueError("This directional-noise experiment requires unit grid cells.")
     if not np.isfinite(R_star) or not 0 < R_star < 1:
-        raise ValueError("R_star must be in (0, 1) for the shifting-support experiment.")
+        raise ValueError("R_star must be in (0, 1) for the directional-noise experiment.")
 
-    def prepare_episode(controller, episode):
-        radius = C_star_shift_2d(episode, shift_period)
-        controller.deployment_env.noise_radius = radius
-        controller.deployment_env.noise_sampler = partial(
-            sample_deviation_2d, radius=radius, R_star=R_star, min_radius=min_radius,
-        )
-        controller.deployment_env.is_nominal = False
-        return {"C_star_k": radius}
+    mdp.noise_sampler = partial(
+        sample_deviation_2d, radius=C_star, R_star=R_star, min_radius=min_radius,
+    )
 
     for trial, trial_seed in enumerate(seeds, first_trial):
         for index, method in enumerate(methods):
@@ -98,7 +93,7 @@ if __name__ == "__main__":
                 delta=delta, delta_1=delta_1, eta=eta, quantile_max=quantile_max,
                 calibration_scores=calibration_scores, calibration_window=calibration_window,
                 pilot_episodes=pilot_episodes, seed=seed, R=fixed_R, C=fixed_C,
-                episode_setup=prepare_episode, q_initializer=q_initializer,
+                q_initializer=q_initializer,
                 accelerated_training=True, step_start_decay_lr=10000000,
             )
             controller.run(n_deployment_episodes, verbose=verbose)
@@ -106,7 +101,8 @@ if __name__ == "__main__":
             results = {
                 "method": method, "seed": seed, "trial": trial, "mdp": deployment_mdp,
                 "horizon": horizon,
-                "R_star": R_star, "shift_period": shift_period,
+                "R_star": R_star,
+                "C_star": C_star,
                 "min_radius": min_radius,
                 "fixed_R": controller.fixed_R, "fixed_C": controller.fixed_C,
                 "history": controller.history,

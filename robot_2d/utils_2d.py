@@ -1,17 +1,18 @@
 """Disturbances, map generation, and plots for the 2-D robot example."""
 
-import math
-
 import matplotlib.pyplot as plt
 import numpy as np
 
 
 def sample_deviation_2d(nominal_position, rng, *, radius, R_star, min_radius=None):
-    """Mix zero error with a uniform length and angle theta in [0, 2*pi).
+    """Mix zero error with uniform lengths and freshly sampled angular mixtures.
 
     The nonzero length is uniform on [min_radius, radius], not over the shell's
     area. The default inner radius is the unit cell's half diagonal, sqrt(2)/2,
     so every active disturbance changes the discrete successor almost surely.
+    Each active step draws 1-4 uniform centers, uniform simplex weights, and a
+    triangular angular half-width uniform from 5 to 90 degrees. Uniform centers
+    make the marginal angle uniform despite the changing conditional mixtures.
     The law is independent of the nominal position.
     """
     if np.shape(nominal_position) != (2,):
@@ -27,16 +28,13 @@ def sample_deviation_2d(nominal_position, rng, *, radius, R_star, min_radius=Non
     if rng.random() >= R_star:
         return np.zeros(2)
     length = rng.uniform(min_radius, radius)
-    theta = rng.uniform(0, 2 * np.pi)
+    ndr = int(rng.integers(1, 5))
+    centers = rng.uniform(0, 2 * np.pi, size=ndr)
+    weights = rng.dirichlet(np.ones(ndr))
+    alpha = rng.uniform(np.pi / 36, np.pi / 2)
+    mode = rng.choice(ndr, p=weights)
+    theta = (centers[mode] + alpha * (rng.random() - rng.random())) % (2 * np.pi)
     return length * np.array((np.cos(theta), np.sin(theta)))
-
-
-def C_star_shift_2d(episode, period=100):
-    """Cycle the 2-D outer radius from 1.5 to 1.1 and back over one period."""
-    if not isinstance(period, (int, np.integer)) or period < 2:
-        raise ValueError("The distribution-shift period must be an integer of at least 2.")
-    phase = 2 * np.pi * (episode % period) / period
-    return float(1.3 + 0.2 * np.cos(phase))
 
 
 def randomize_obstacles(mdp, rng, n_obstacles=10):
@@ -140,69 +138,25 @@ def plot_robot_2d_tabular(mdp, agent, *, show=True):
     return fig
 
 
-def plot_trajectories(run, method_label):
-    """Overlay every recorded deployment episode on its trial's fixed obstacle map."""
-    mdp, history = run["mdp"], run["history"]
-    if not history:
+def plot_trajectories(runs, method_label):
+    """Overlay all trials on their shared map, coloring each path by deployment episode."""
+    if not runs or not any(run["history"] for run in runs):
         raise ValueError("At least one deployment episode is required for plotting.")
+    mdp = runs[0]["mdp"]
+    episode_count = max(len(run["history"]) for run in runs)
+    trajectory_count = sum(len(run["history"]) for run in runs)
     fig, axis = plt.subplots(figsize=(8, 7), constrained_layout=True)
     plot_robot_map(mdp, axis)
     cmap = plt.get_cmap("viridis")
-    norm = plt.Normalize(vmin=0.5, vmax=len(history) + 0.5)
-    trajectories = [np.asarray(row["positions"]) for row in history]
-    for episode, trajectory in enumerate(trajectories, 1):
-        axis.plot(trajectory[:, 0], trajectory[:, 1], color=cmap(norm(episode)),
-                  linewidth=1, alpha=0.5, marker=".", markersize=3)
-    positions = np.concatenate(trajectories)
-    lo = np.minimum(positions.min(axis=0), 0) - 0.2 * mdp.cell_widths
-    hi = np.maximum(positions.max(axis=0), mdp.bounds) + 0.2 * mdp.cell_widths
-    axis.set(xlim=(lo[0], hi[0]), ylim=(lo[1], hi[1]))
-    ticks = np.unique(np.linspace(1, len(history), min(6, len(history)), dtype=int))
+    norm = plt.Normalize(vmin=0.5, vmax=episode_count + 0.5)
+    for run in runs:
+        for episode, row in enumerate(run["history"], 1):
+            trajectory = np.asarray(row["positions"])
+            axis.plot(trajectory[:, 0], trajectory[:, 1], color=cmap(norm(episode)),
+                      linewidth=0.5, alpha=0.1)
+    ticks = np.unique(np.linspace(1, episode_count, min(6, episode_count), dtype=int))
     fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
                  ticks=ticks, label="Deployment episode")
-    axis.set_title(f"{method_label}, trial {run['trial']}\n"
-                   f"{len(history)} deployment trajectories")
+    axis.set_title(f"{method_label}: {len(runs)} trials\n"
+                   f"{trajectory_count:,} deployment trajectories")
     return fig
-
-
-def disk_rectangle_area(radius, xlo, xhi, ylo, yhi):
-    """Disk/rectangle intersection, used only for the offline mismatch reference."""
-    xlo, xhi = max(-radius, xlo), min(radius, xhi)
-    ylo, yhi = max(-radius, ylo), min(radius, yhi)
-    if xlo >= xhi or ylo >= yhi:
-        return 0.0
-    splits = [xlo, xhi]
-    for height in (ylo, yhi):
-        if abs(height) < radius:
-            root = math.sqrt(radius**2 - height**2)
-            splits.extend(x for x in (-root, root) if xlo < x < xhi)
-    splits = sorted(set(splits))
-
-    def primitive(x):
-        root = math.sqrt(max(0.0, radius**2 - x**2))
-        return 0.5 * (x * root + radius**2 * math.asin(x / radius))
-
-    area = 0.0
-    for left, right in zip(splits[:-1], splits[1:]):
-        height = math.sqrt(max(0.0, radius**2 - ((left + right) / 2)**2))
-        if min(yhi, height) <= max(ylo, -height):
-            continue
-        upper_const, upper_arc = (yhi, 0) if yhi < height else (0, 1)
-        lower_const, lower_arc = (ylo, 0) if ylo > -height else (0, -1)
-        area += (upper_const - lower_const) * (right - left)
-        area += (upper_arc - lower_arc) * (primitive(right) - primitive(left))
-    return max(0.0, area)
-
-
-def mismatch_probabilities(mdp):
-    """Common mismatch probability for every grid source, including the goal."""
-    if mdp.noise_sampler is not None:
-        raise ValueError("This offline reference assumes the default zero/uniform-disk noise.")
-    probability = 0.0
-    if mdp.noise_radius > 0:
-        hx, hy = mdp.cell_widths / 2
-        area = disk_rectangle_area(mdp.noise_radius, -hx, hx, -hy, hy)
-        nominal_mass = area / (np.pi * mdp.noise_radius**2)
-        probability = mdp.noise_probability * (1 - nominal_mass)
-    result = np.full((mdp.n_state, mdp.action_space.n), probability)
-    return np.clip(result, 0, 1)

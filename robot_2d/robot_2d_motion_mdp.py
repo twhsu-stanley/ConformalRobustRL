@@ -18,8 +18,8 @@ class Robot2DMotionMDP(GridRobotMotionMDP):
     Every outside cell is a distinct terminal state with implicit value zero.
     gamma defines the discounted objective for learning and deployment returns.
 
-    A custom noise_sampler(nominal_position, rng) returns a bounded 2-D deviation.
-    The default sampler mixes zero deviation with uniform noise in a disk.
+    A custom noise_sampler(nominal_position, rng) returns a finite 2-D deviation.
+    With no sampler, every transition follows the nominal model.
     Noise is never projected or resampled. Segment contacts stop uncertain rollouts
     at the first terminal cell. Mismatches use the original sampled endpoint.
     Every sampled disturbance, including the terminal one, enters the ACP score.
@@ -32,7 +32,7 @@ class Robot2DMotionMDP(GridRobotMotionMDP):
     def __init__(
         self, *, x_max, y_max, grid_shape, start_cell, goal_cell, gamma,
         movement_reward, goal_reward, obstacles=None,
-        noise_probability=0.0, noise_radius=1.2, noise_sampler=None,
+        noise_sampler=None,
         max_episode_steps=100, seed=None,
     ):
         self.bounds = np.asarray((x_max, y_max), dtype=float)
@@ -58,14 +58,9 @@ class Robot2DMotionMDP(GridRobotMotionMDP):
         self.goal_reward = self._probability(goal_reward, "goal_reward")
         if self.goal_reward <= self.movement_reward:
             raise ValueError("goal_reward must exceed movement_reward.")
-        self.noise_probability = self._probability(noise_probability, "noise_probability")
-        if not np.isfinite(noise_radius) or noise_radius < 0:
-            raise ValueError("noise_radius must be finite and nonnegative.")
         if noise_sampler is not None and not callable(noise_sampler):
             raise ValueError("noise_sampler must be callable.")
-        self.noise_radius = float(noise_radius)
         self.noise_sampler = noise_sampler
-        self.is_nominal = noise_sampler is None and self.noise_probability == 0.0
 
         self.obstacle_mask = np.zeros((self.ny, self.nx), dtype=bool)
         self.start_state = self._validate_state(start_cell)
@@ -172,21 +167,6 @@ class Robot2DMotionMDP(GridRobotMotionMDP):
         states = self.localized_uncertainty_states(nominal_next_state, C)
         return float(np.min(self.values_at(states, values)))
 
-    def _sample_deviation(self, nominal_position):
-        if self.noise_sampler is not None:
-            deviation = np.asarray(self.noise_sampler(nominal_position.copy(), self.np_random))
-        elif self.noise_probability > 0 and self.np_random.random() < self.noise_probability:
-            angle = self.np_random.uniform(0, 2 * np.pi)
-            radius = self.noise_radius * np.sqrt(self.np_random.random())
-            deviation = radius * np.array((np.cos(angle), np.sin(angle)))
-        else:
-            deviation = np.zeros(2)
-        if deviation.shape != (2,) or not np.all(np.isfinite(deviation)):
-            raise ValueError("Noise sampler must return a finite 2-D deviation.")
-        if np.linalg.norm(deviation) > self.noise_radius + 1e-12:
-            raise ValueError("Noise sampler exceeded its configured support radius.")
-        return deviation.astype(float)
-
     def clone(self, *, nominal=False, max_episode_steps=None, seed=None):
         """Create an independent rollout instance with the same map, rewards, and discount."""
         obstacle_cells = [(int(ix), int(iy)) for iy, ix in np.argwhere(self.obstacle_mask)]
@@ -195,8 +175,7 @@ class Robot2DMotionMDP(GridRobotMotionMDP):
             x_max=self.bounds[0], y_max=self.bounds[1], grid_shape=self.grid_shape,
             obstacles=obstacle_cells, start_cell=self.start_state, goal_cell=self.goal_state,
             gamma=self.gamma, movement_reward=self.movement_reward, goal_reward=self.goal_reward,
-            noise_probability=0.0 if nominal else self.noise_probability,
-            noise_radius=self.noise_radius, noise_sampler=None if nominal else self.noise_sampler,
+            noise_sampler=None if nominal else self.noise_sampler,
             max_episode_steps=horizon, seed=seed,
         )
 

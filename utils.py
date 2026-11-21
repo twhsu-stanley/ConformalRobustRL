@@ -17,6 +17,71 @@ def calc_evaluation_return_mean_std(evaluation_return):
     return evaluation_return_mean, evaluation_return_std, evaluation_return_np
 
 
+def load_online_results(output_dir, method_settings):
+    """Read saved runs matching the methods and uncertainty settings being plotted."""
+    import pickle
+    from pathlib import Path
+
+    runs = []
+    for method, (R, C, _) in method_settings.items():
+        for filename in sorted(Path(output_dir).glob(f"results_{method}_R{R}_C{C}_trial_*.pkl")):
+            with filename.open("rb") as file:
+                runs.append(pickle.load(file))
+    return runs
+
+
+def _format_mean_std(values):
+    """Format sample standard deviation; one trial cannot estimate that deviation."""
+    spread = f"{np.std(values, ddof=1):.4f}" if len(values) > 1 else "N/A"
+    return f"{np.mean(values):.4f} +/- {spread}"
+
+
+def print_online_summary(runs, method_labels):
+    """Print the experiment setup, result table, training convergence, and R estimates."""
+    mdp = runs[0]["mdp"]
+    episode_counts = [len(run["history"]) for run in runs]
+    episodes = str(min(episode_counts))
+    if min(episode_counts) != max(episode_counts):
+        episodes += f"..{max(episode_counts)}"
+    print(f"\n{len(mdp.grid_shape)}D online experiment")
+    print(f"Grid: {mdp.grid_shape}; cell widths: {tuple(map(float, mdp.cell_widths))}")
+    print(f"Start: {tuple(map(float, mdp.coordinates(mdp.start_state)))}; "
+          f"goal: {tuple(map(float, mdp.coordinates(mdp.goal_state)))}")
+    print(f"Obstacles: {mdp.obstacle_mask.sum()}; gamma: {mdp.gamma:g}; "
+          f"transition limit: {runs[0]['horizon']}")
+    if "map_seed" in runs[0]:
+        print(f"Map seed: {runs[0]['map_seed']}")
+    print(f"Deployment episodes/trial: {episodes}; saved runs: {len(runs)}")
+    print(f"True R*: {runs[0]['R_star']:g}")
+    print("Returns: mean +/- sample SD of trial averages; goal/hit rates pool all episodes.")
+    print(f"{'Method':<28} {'Trials':>6} {'Episodes':>9} "
+          f"{'Return mean +/- SD':>22} {'Goal (%)':>10} {'Obstacle (%)':>9}")
+    for method in dict.fromkeys(run["method"] for run in runs):
+        selected = [run for run in runs if run["method"] == method]
+        returns = [np.mean([row["discounted_return"] for row in run["history"]])
+                   for run in selected]
+        history = [row for run in selected for row in run["history"]]
+        goal = 100 * np.mean([row["goal_reached"] for row in history])
+        hit = 100 * np.mean([row["collision"] for row in history])
+        print(f"{method_labels[method]:<28} {len(selected):>6} {len(history):>9,} "
+              f"{_format_mean_std(returns):>22} {goal:>10.1f} {hit:>9.1f}")
+
+    training_records = [row["training"] for run in runs for row in run["history"]
+                        if not row["training_reused"]]
+    converged_run_count = sum(training_record["converged"] for training_record in training_records)
+    max_bellman_residual = max(training_record["bellman_residual"]
+                              for training_record in training_records)
+    tolerances = ", ".join(f"{value:g}" for value in sorted({
+        training_record["tolerance"] for training_record in training_records
+    }))
+    print(f"Q-learning runs converged: {converged_run_count:,}/{len(training_records):,}; "
+          f"tolerance={tolerances}; maximum residual={max_bellman_residual:.6g}")
+    estimated = [run for run in runs if run["fixed_R"] is None]
+    if estimated:
+        final_R = [run["history"][-1]["R_hat_next"] for run in estimated]
+        print(f"Final R estimate: {_format_mean_std(final_R)} across {len(estimated)} trials; "
+              f"initial estimate={estimated[0]['history'][0]['R_used']:g}")
+
 def _set_plot_limits(axes, *, xlim=None, ylim=None):
     """Set optional limits; dict keys select zero-based subplot indices."""
     for index, axis in enumerate(np.atleast_1d(axes).flat):
@@ -42,13 +107,16 @@ def plot_acp(runs, *, xlim=None, ylim=None):
     axes[0].plot(
         episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$",
     )
-    if "C_star_k" in history[0]:
+    support_bounds = run.get("C_star")
+    if support_bounds is None and "C_star_k" in history[0]:
         support_bounds = [row["C_star_k"] for row in history]
-        axes[0].plot(episodes, support_bounds, "k:", label=r"True support bound $C^\star$")
+    if support_bounds is not None:
+        axes[0].plot(episodes, np.broadcast_to(support_bounds, episodes.shape), "k:",
+                     label=r"True support bound $C^\star$")
     finite_radii = radii[np.isfinite(radii)]
     ceiling = max(1, np.nanmax(scores, initial=0), np.max(finite_radii, initial=0))
-    if "C_star_k" in history[0]:
-        ceiling = max(ceiling, max(support_bounds))
+    if support_bounds is not None:
+        ceiling = max(ceiling, np.max(support_bounds))
     ceiling *= 1.1
     unbounded = np.isposinf(radii)
     if np.any(unbounded):
@@ -89,7 +157,7 @@ def plot_R(runs, R_star=None, *, xlim=None, ylim=None):
 
 
 def plot_performance(runs, method_labels, *, xlim=None, ylim=None):
-    """Plot averaged cumulative returns and print goal-reaching and obstacle-hitting rates."""
+    """Plot averaged cumulative returns; print_online_summary reports the outcome statistics."""
     import matplotlib.pyplot as plt
 
     fig, axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
@@ -103,10 +171,6 @@ def plot_performance(runs, method_labels, *, xlim=None, ylim=None):
         averages = np.cumsum(returns, axis=1) / episodes
         axis.plot(episodes, averages.T, color=color, alpha=0.2)
         axis.plot(episodes, np.mean(averages, axis=0), color=color, label=label)
-        goal_rate = np.mean([row["goal_reached"] for history in histories for row in history])
-        collision_rate = np.mean([row["collision"] for history in histories for row in history])
-        print(f"{label}: goal-reaching rate = {goal_rate:.1%}, "
-              f"obstacle-hitting rate = {collision_rate:.1%}")
     axis.set(title="Cumulative mean discounted reward", xlabel="Online episode", ylabel="Reward")
     _set_plot_limits(axis, xlim=xlim, ylim=ylim)
     return fig

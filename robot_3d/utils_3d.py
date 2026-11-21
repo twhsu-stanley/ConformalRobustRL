@@ -2,43 +2,43 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.special import ndtri
 
 
-def sample_deviation_3d(nominal_position, rng, *, radius, R_star, min_radius=None):
-    """Mix zero error with a uniform length and a uniform direction on the sphere.
+def sample_deviation_3d(nominal_position, rng, *, R_star, cell_widths=(1., 1., 1.)):
+    """Draw a Gaussian error using fresh uniform simplex weights at every step.
 
-    Sample theta uniformly on [0, 2*pi) and z uniformly on [-1, 1] independently.
-    The direction is (sqrt(1-z**2)*cos(theta), sqrt(1-z**2)*sin(theta), z).
-    The nonzero length is uniform on [min_radius, radius], not over the shell's
-    volume. The default inner radius is the unit cell's half diagonal, sqrt(3)/2,
-    so every active disturbance changes the discrete successor almost surely.
-    The law is independent of the nominal position.
+    Conditional on the weights, the axes are independent zero-mean Gaussians.
+    Every conditional law leaves the nominal cell with probability R_star.
+    There is no finite support radius; marginally the law is a Gaussian mixture.
     """
     if np.shape(nominal_position) != (3,):
         raise ValueError("The 3-D disturbance requires a 3-D position.")
-    if not np.isfinite(R_star) or not 0 <= R_star <= 1:
-        raise ValueError("R_star must be in [0, 1].")
-    half_diagonal = np.sqrt(3) / 2
-    min_radius = half_diagonal if min_radius is None else min_radius
-    if not np.isfinite(min_radius) or min_radius < half_diagonal:
-        raise ValueError("min_radius must be at least the unit cell's half diagonal.")
-    if not np.isfinite(radius) or radius <= min_radius:
-        raise ValueError("The outer radius must be finite and exceed min_radius.")
-    if rng.random() >= R_star:
-        return np.zeros(3)
-    length = rng.uniform(min_radius, radius)
-    theta = rng.uniform(0, 2 * np.pi)
-    z = rng.uniform(-1, 1)
-    xy = np.sqrt(1 - z**2)
-    return length * np.array((xy * np.cos(theta), xy * np.sin(theta), z))
+    weights = rng.dirichlet(np.ones(3))
+    variances = gaussian_directional_variance_3d(R_star, weights, cell_widths)
+    return rng.normal(scale=np.sqrt(variances), size=3)
 
 
-def C_star_shift_3d(episode, period=100):
-    """Cycle the 3-D outer radius between 0.95 and 1.25, starting at 1.25."""
-    if not isinstance(period, (int, np.integer)) or period < 2:
-        raise ValueError("The distribution-shift period must be an integer of at least 2.")
-    phase = 2 * np.pi * (episode % period) / period
-    return float(1.1 + 0.15 * np.cos(phase))
+def gaussian_directional_variance_3d(R_star, weights, cell_widths=(1., 1., 1.)):
+    """Choose diagonal variances with nominal-cell probability exactly 1 - R_star.
+
+    Axis i stays in its cell with probability (1 - R_star)**weights[i]. The
+    weights are positive and sum to one. Half cell widths set the physical scale.
+    """
+    if not np.isfinite(R_star) or not 0 < R_star < 1:
+        raise ValueError("R_star must be in (0, 1) for a nondegenerate Gaussian.")
+    weights = np.asarray(weights, dtype=float)
+    widths = np.asarray(cell_widths, dtype=float)
+    if weights.shape != (3,) or np.any(~np.isfinite(weights)) or np.any(weights <= 0):
+        raise ValueError("weights must contain three positive finite values.")
+    if not np.isclose(weights.sum(), 1, rtol=0, atol=1e-12):
+        raise ValueError("weights must sum to one.")
+    if widths.shape != (3,) or np.any(~np.isfinite(widths)) or np.any(widths <= 0):
+        raise ValueError("cell_widths must contain three positive finite values.")
+    # Use the lower Gaussian tail to avoid cancellation when the inside mass is near one.
+    tail = -np.expm1(weights * np.log1p(-R_star))
+    standard_deviations = (widths / 2) / -ndtri(tail / 2)
+    return standard_deviations**2
 
 
 def randomize_obstacles(mdp, rng, n_obstacles=20):

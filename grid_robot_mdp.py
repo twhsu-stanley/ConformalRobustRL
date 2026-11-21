@@ -10,6 +10,22 @@ import numpy as np
 class GridRobotMotionMDP(gym.Env):
     """Common behavior; examples define geometry, indexing, noise, and their prompts."""
 
+    @property
+    def is_nominal(self):
+        """A missing disturbance sampler gives deterministic nominal transitions."""
+        return self.noise_sampler is None
+
+    def _sample_deviation(self, nominal_position):
+        """Call the supplied sampler, or use zero deviation, and validate its vector."""
+        dimension = len(self.grid_shape)
+        if self.noise_sampler is None:
+            return np.zeros(dimension)
+        deviation = np.asarray(self.noise_sampler(nominal_position.copy(), self.np_random),
+                               dtype=float)
+        if deviation.shape != (dimension,) or not np.all(np.isfinite(deviation)):
+            raise ValueError(f"Noise sampler must return a finite {dimension}-D deviation.")
+        return deviation.copy()
+
     @staticmethod
     def _probability(value, name):
         if not np.isfinite(value) or not 0.0 <= value <= 1.0:

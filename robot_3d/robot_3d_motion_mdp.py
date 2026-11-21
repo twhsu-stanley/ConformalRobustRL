@@ -19,8 +19,7 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
     gamma defines the discounted objective for learning and deployment returns.
 
     A custom noise_sampler(nominal_position, rng) returns a finite 3-D deviation.
-    Set noise_radius=np.inf for an unbounded custom disturbance distribution.
-    The default sampler mixes zero deviation with uniform noise in a ball.
+    With no sampler, every transition follows the nominal model.
     Noise is never projected or resampled. Segment contacts stop uncertain rollouts
     at the first terminal cell. Mismatches use the original sampled endpoint.
     Every sampled disturbance, including the terminal one, enters the ACP score.
@@ -35,7 +34,7 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
     def __init__(
         self, *, x_max, y_max, z_max, grid_shape, start_cell, goal_cell, gamma,
         movement_reward, goal_reward, obstacles=None,
-        noise_probability=0.0, noise_radius=1.2, noise_sampler=None,
+        noise_sampler=None,
         max_episode_steps=100, seed=None,
     ):
         self.bounds = np.asarray((x_max, y_max, z_max), dtype=float)
@@ -61,16 +60,9 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
         self.goal_reward = self._probability(goal_reward, "goal_reward")
         if self.goal_reward <= self.movement_reward:
             raise ValueError("goal_reward must exceed movement_reward.")
-        self.noise_probability = self._probability(noise_probability, "noise_probability")
-        if np.isnan(noise_radius) or noise_radius < 0:
-            raise ValueError("noise_radius must be nonnegative, or positive infinity.")
-        if np.isinf(noise_radius) and noise_sampler is None and self.noise_probability > 0:
-            raise ValueError("The default uniform-ball sampler requires a finite noise_radius.")
         if noise_sampler is not None and not callable(noise_sampler):
             raise ValueError("noise_sampler must be callable.")
-        self.noise_radius = float(noise_radius)
         self.noise_sampler = noise_sampler
-        self.is_nominal = noise_sampler is None and self.noise_probability == 0.0
 
         self.obstacle_mask = np.zeros((self.nz, self.ny, self.nx), dtype=bool)
         self.start_state = self._validate_state(start_cell)
@@ -186,23 +178,6 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
         states = self.localized_uncertainty_states(nominal_next_state, C)
         return float(np.min(self.values_at(states, values)))
 
-    def _sample_deviation(self, nominal_position):
-        if self.noise_sampler is not None:
-            deviation = np.asarray(self.noise_sampler(nominal_position.copy(), self.np_random))
-        elif self.noise_probability > 0 and self.np_random.random() < self.noise_probability:
-            direction = self.np_random.normal(size=3)
-            while np.linalg.norm(direction) == 0:
-                direction = self.np_random.normal(size=3)
-            radius = self.noise_radius * self.np_random.random()**(1 / 3)
-            deviation = radius * direction / np.linalg.norm(direction)
-        else:
-            deviation = np.zeros(3)
-        if deviation.shape != (3,) or not np.all(np.isfinite(deviation)):
-            raise ValueError("Noise sampler must return a finite 3-D deviation.")
-        if np.linalg.norm(deviation) > self.noise_radius + 1e-12:
-            raise ValueError("Noise sampler exceeded its configured support radius.")
-        return deviation.astype(float)
-
     def clone(self, *, nominal=False, max_episode_steps=None, seed=None):
         """Create an independent rollout instance with the same map, rewards, and discount."""
         obstacle_cells = [tuple(map(int, cell[::-1])) for cell in np.argwhere(self.obstacle_mask)]
@@ -212,7 +187,6 @@ class Robot3DMotionMDP(GridRobotMotionMDP):
             grid_shape=self.grid_shape,
             obstacles=obstacle_cells, start_cell=self.start_state, goal_cell=self.goal_state,
             gamma=self.gamma, movement_reward=self.movement_reward, goal_reward=self.goal_reward,
-            noise_probability=0.0 if nominal else self.noise_probability,
-            noise_radius=self.noise_radius, noise_sampler=None if nominal else self.noise_sampler,
+            noise_sampler=None if nominal else self.noise_sampler,
             max_episode_steps=horizon, seed=seed,
         )
