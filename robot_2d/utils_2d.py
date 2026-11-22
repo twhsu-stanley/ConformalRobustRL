@@ -4,16 +4,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def sample_deviation_2d(nominal_position, rng, *, radius, R_star, min_radius=None):
-    """Mix zero error with uniform lengths and freshly sampled angular mixtures.
+def sample_deviation_2d(nominal_position, rng, *, radius, R_star, peak_angles, min_radius=None):
+    """Mix zero error with uniform slip lengths and five von Mises directions.
 
     The nonzero length is uniform on [min_radius, radius], not over the shell's
     area. The default inner radius is the unit cell's half diagonal, sqrt(2)/2,
     so every active disturbance changes the discrete successor almost surely.
-    Each active step draws 1-4 uniform centers, uniform simplex weights, and a
-    triangular angular half-width uniform from 5 to 90 degrees. Uniform centers
-    make the marginal angle uniform despite the changing conditional mixtures.
-    The law is independent of the nominal position.
+    Each step draws Dirichlet(1,...,1) weights and Uniform[0,8) concentrations.
+    peak_angles is a writable floating array initialized as 2*pi*arange(5)/5.
+    After sampling, its entries advance in place by independent Gaussian
+    increments with standard deviation pi/12, wrapped modulo 2*pi, even if
+    no slip occurs. Retain this array across pilot and deployment episodes;
+    use a fresh array for each trial and method. Position does not affect the law.
     """
     if np.shape(nominal_position) != (2,):
         raise ValueError("The 2-D disturbance requires a 2-D position.")
@@ -25,16 +27,20 @@ def sample_deviation_2d(nominal_position, rng, *, radius, R_star, min_radius=Non
         raise ValueError("min_radius must be at least the unit cell's half diagonal.")
     if not np.isfinite(radius) or radius <= min_radius:
         raise ValueError("The outer radius must be finite and exceed min_radius.")
-    if rng.random() >= R_star:
-        return np.zeros(2)
-    length = rng.uniform(min_radius, radius)
-    ndr = int(rng.integers(1, 5))
-    centers = rng.uniform(0, 2 * np.pi, size=ndr)
-    weights = rng.dirichlet(np.ones(ndr))
-    alpha = rng.uniform(np.pi / 36, np.pi / 2)
-    mode = rng.choice(ndr, p=weights)
-    theta = (centers[mode] + alpha * (rng.random() - rng.random())) % (2 * np.pi)
-    return length * np.array((np.cos(theta), np.sin(theta)))
+    if (not isinstance(peak_angles, np.ndarray) or peak_angles.shape != (5,)
+            or peak_angles.dtype.kind != "f" or not peak_angles.flags.writeable
+            or not np.all(np.isfinite(peak_angles))):
+        raise ValueError("peak_angles must be a writable finite floating array of length five.")
+    weights = rng.dirichlet(np.ones(5))
+    concentrations = rng.uniform(0, 8, size=5)
+    deviation = np.zeros(2)
+    if rng.random() < R_star:
+        length = rng.uniform(min_radius, radius)
+        mode = rng.choice(5, p=weights)
+        theta = rng.vonmises(peak_angles[mode], concentrations[mode]) % (2 * np.pi)
+        deviation = length * np.array((np.cos(theta), np.sin(theta)))
+    peak_angles[:] = (peak_angles + rng.normal(0, np.pi / 12, size=5)) % (2 * np.pi)
+    return deviation
 
 
 def plot_robot_map(mdp, axis):

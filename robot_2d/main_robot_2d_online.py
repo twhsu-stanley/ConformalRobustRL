@@ -81,15 +81,16 @@ if __name__ == "__main__":
     if not np.isfinite(R_star) or not 0 < R_star < 1:
         raise ValueError("R_star must be in (0, 1) for the directional-noise experiment.")
 
-    mdp.noise_sampler = partial(
-        sample_deviation_2d, radius=C_star, R_star=R_star, min_radius=min_radius,
-    )
-
     for trial, trial_seed in enumerate(seeds, first_trial):
         for index, method in enumerate(methods):
             seed = trial_seed + 100000 * index
             if method not in METHOD_SETTINGS:
                 raise ValueError(f"Unknown method: {method}.")
+            # Each run owns one peak-angle sequence, continued across all its episodes.
+            mdp.noise_sampler = partial(
+                sample_deviation_2d, radius=C_star, R_star=R_star, min_radius=min_radius,
+                peak_angles=2 * np.pi * np.arange(5) / 5,
+            )
             fixed_R, fixed_C = (R, C) if method == "proposed" else METHOD_SETTINGS[method][:2]
             controller = ConformallyRobustController(
                 mdp, horizon=horizon, training_horizon=horizon,
