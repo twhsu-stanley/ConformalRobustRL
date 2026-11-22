@@ -93,6 +93,28 @@ def _set_plot_limits(axes, *, xlim=None, ylim=None):
             axis.set_ylim(y_limits)
 
 
+def _plot_acp_coverage(run, axis):
+    """Draw first-trial scores and ACP predictions on the supplied axis."""
+    history = run["history"]
+    episodes = np.arange(1, len(history) + 1)
+    radii = np.asarray([row["C_hat"] for row in history])
+    scores = np.asarray([row["score"] for row in history], dtype=float)
+    axis.plot(episodes, scores, ".", label="nonconformity scores")
+    axis.plot(
+        episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$",
+    )
+    finite_radii = radii[np.isfinite(radii)]
+    ceiling = 1.1 * max(1, np.nanmax(scores, initial=0), np.max(finite_radii, initial=0))
+    unbounded = np.isposinf(radii)
+    if np.any(unbounded):
+        axis.scatter(
+            episodes[unbounded], np.full(sum(unbounded), ceiling), marker="^",
+            label=r"$\hat{C}_k=\infty$",
+        )
+    axis.set(title="Scores and predictions, first trial",
+             xlabel="Deployment episode k", ylabel="Distance")
+
+
 def plot_acp(runs, *, xlim=None, ylim=None):
     """Return independent coverage and adaptive-delta figures for the first trial."""
     import matplotlib.pyplot as plt
@@ -100,24 +122,9 @@ def plot_acp(runs, *, xlim=None, ylim=None):
     coverage, coverage_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     delta, delta_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     run = runs[0]
+    _plot_acp_coverage(run, coverage_axis)
     history = run["history"]
     episodes = np.arange(1, len(history) + 1)
-    radii = np.asarray([row["C_hat"] for row in history])
-    scores = np.asarray([row["score"] for row in history], dtype=float)
-    coverage_axis.plot(episodes, scores, ".", label="nonconformity scores")
-    coverage_axis.plot(
-        episodes, np.where(np.isfinite(radii), radii, np.nan), label=r"ACP quantile $\hat{C}_k$",
-    )
-    finite_radii = radii[np.isfinite(radii)]
-    ceiling = 1.1 * max(1, np.nanmax(scores, initial=0), np.max(finite_radii, initial=0))
-    unbounded = np.isposinf(radii)
-    if np.any(unbounded):
-        coverage_axis.scatter(
-            episodes[unbounded], np.full(sum(unbounded), ceiling), marker="^",
-            label=r"$\hat{C}_k=\infty$",
-        )
-    coverage_axis.set(title="Scores and predictions, first trial",
-                      xlabel="Deployment episode k", ylabel="Distance")
 
     delta_axis.plot(episodes, [row["delta_k"] for row in history], label=r"$\delta_k$")
     delta_axis.axhline(run["delta"], color="black", linestyle="--", label=r"Target $\delta$")
@@ -128,11 +135,12 @@ def plot_acp(runs, *, xlim=None, ylim=None):
     return coverage, delta
 
 
-def plot_R(runs, R_star=None, *, xlim=None, ylim=None):
+def plot_R(runs, R_star=None, *, xlim=None, ylim=None, axis=None):
     """Compare cumulative R estimates with the common true R-star."""
     import matplotlib.pyplot as plt
 
-    fig, axis = plt.subplots(figsize=(6, 4), constrained_layout=True)
+    if axis is None:
+        _, axis = plt.subplots(figsize=(6, 4), constrained_layout=True)
     estimates = []
     if R_star is None:
         R_star = [run["R_star"] for run in runs]
@@ -145,6 +153,17 @@ def plot_R(runs, R_star=None, *, xlim=None, ylim=None):
     axis.axhline(np.mean(R_star), color="black", linestyle=":", label=r"True $R^\star$")
     axis.set(title="R estimation", xlabel="Deployment episode k", ylabel="Probability")
     _set_plot_limits(axis, xlim=xlim, ylim=ylim)
+    return axis.figure
+
+
+def plot_R_acp(estimated_runs, calibrated_runs, *, xlim=None, ylim=None):
+    """Combine R estimates and first-trial ACP coverage in a 1-by-2 figure."""
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
+    plot_R(estimated_runs, axis=axes[0])
+    _plot_acp_coverage(calibrated_runs[0], axes[1])
+    _set_plot_limits(axes, xlim=xlim, ylim=ylim)
     return fig
 
 

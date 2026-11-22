@@ -11,7 +11,7 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
-from utils import load_online_results, plot_R, plot_acp, plot_performance
+from utils import load_online_results, plot_R, plot_acp, plot_R_acp, plot_performance
 from utils import print_online_summary
 
 
@@ -51,6 +51,8 @@ if __name__ == "__main__":
         figures["acp_coverage"], figures["acp_delta_k"] = plot_acp(
             calibrated, xlim=episode_xlim, ylim=None,
         )
+    if estimated and calibrated:
+        figures["r_acp"] = plot_R_acp(estimated, calibrated, xlim=episode_xlim, ylim={0: (0, 0.6)})
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")
