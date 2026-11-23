@@ -12,7 +12,7 @@ from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 
 if __name__ == "__main__":
     n_cases = 100
-    lr_init = 0.5
+    lr_init = 0.9
     step_start_decay_lr = 10000000
     epsilon_init = 0.1
     epsilon_lb = 0.01
@@ -29,7 +29,7 @@ if __name__ == "__main__":
     root = Path(__file__).resolve().parent / "saved_results"
     dataset_path = root / "q_transformer/q_data_3d.npz"
     checkpoint_path = root / "q_transformer/checkpoint"
-    output_dir = root / "online"
+    output_dir = root / "q_transformer/evaluation"
 
     template = Robot3DMotionMDP(
         x_max=10.0, y_max=10.0, z_max=10.0, grid_shape=(10, 10, 10),

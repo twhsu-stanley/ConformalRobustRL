@@ -29,7 +29,7 @@ if __name__ == "__main__":
     root = Path(__file__).resolve().parent / "saved_results"
     dataset_path = root / "q_transformer/q_data_2d.npz"
     checkpoint_path = root / "q_transformer/checkpoint"
-    output_dir = root / "online"
+    output_dir = root / "q_transformer/evaluation"
 
     template = Robot2DMotionMDP(
         x_max=10.0, y_max=10.0, grid_shape=(10, 10), start_cell=(1, 1), goal_cell=(8, 8),
