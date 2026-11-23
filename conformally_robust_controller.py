@@ -9,7 +9,7 @@ from Tabular_Agent import Tabular_Agent
 class ConformallyRobustController:
     """Own independent nominal/deployment environments and persistent calibration.
 
-    Adaptive planning starts Algorithm 1 from zero every episode. Fixed R and C
+    Algorithm 1 starts from zero unless a q_initializer is supplied. Fixed R and C
     reuse the policy on the fixed nominal training MDP. The MDP supplies clone()
     and deploy_policy(). Only actual deployment transitions enter the mismatch
     estimate; pilot calibration does not. Episodes stop at a terminal condition,
@@ -23,36 +23,43 @@ class ConformallyRobustController:
     R_used and C_used are the actual Algorithm 1 inputs.
     episode_setup(controller, index) runs before each episode and returns metadata.
     Indices are zero-based online and negative for the initial pilot episodes.
+    q_initializer(mdp, R_used, C_used) optionally returns the initial Q-table;
+    the predictor remains outside the agent and saved experiment results.
+    max_training_episodes caps Algorithm 1; training_tolerance controls convergence.
     """
 
     def __init__(
-        self, mdp, *, gamma=0.95, horizon=100, training_episodes=2000,
+        self, mdp, *, horizon=100, max_training_episodes=20000,
+        training_tolerance=1e-6, training_check_every=100,
         training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
         eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100,
         pilot_episodes=20,
         lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
         epsilon_decay_rate=0.995, seed=None, R=None, C=None,
-        episode_setup=None,
+        episode_setup=None, q_initializer=None, accelerated_training=False,
     ):
         Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
         for name, value in (
-            ("horizon", horizon), ("training_episodes", training_episodes),
+            ("horizon", horizon), ("max_training_episodes", max_training_episodes),
             ("training_horizon", training_horizon), ("pilot_episodes", pilot_episodes),
+            ("training_check_every", training_check_every),
         ):
             if name == "pilot_episodes" and C is not None:
                 continue
             minimum = 0 if name == "pilot_episodes" else 1
             if not isinstance(value, (int, np.integer)) or value < minimum:
                 raise ValueError(f"{name} must be an integer of at least {minimum}.")
-        if not np.isfinite(gamma) or not 0 <= gamma < 1:
-            raise ValueError("gamma must be in [0, 1).")
-        self.gamma = float(gamma)
+        if not np.isfinite(training_tolerance) or training_tolerance <= 0:
+            raise ValueError("training_tolerance must be positive and finite.")
         self.horizon = int(horizon)
-        self.training_episodes = int(training_episodes)
+        self.max_training_episodes = int(max_training_episodes)
+        self.training_tolerance = float(training_tolerance)
+        self.training_check_every = int(training_check_every)
         self.pilot_episodes = int(pilot_episodes) if C is None else 0
         self.fixed_R = None if R is None else float(R)
         self.fixed_C = None if C is None else float(C)
         self.episode_setup = episode_setup
+        self.q_initializer = q_initializer
         self.rng = np.random.default_rng(seed)
         self.training_env = mdp.clone(nominal=True, max_episode_steps=training_horizon)
         self.deployment_env = mdp.clone(max_episode_steps=horizon, seed=self._next_seed())
@@ -65,11 +72,13 @@ class ConformallyRobustController:
         self.agent = None
         self.Q = None
         self.policy = None
-        self.agent_options = {
-            "gamma": self.gamma, "lr_init": lr_init,
+        self.q_learning_options = {
+            "lr_init": lr_init,
             "step_start_decay_lr": step_start_decay_lr, "epsilon_init": epsilon_init,
             "epsilon_lb": epsilon_lb, "epsilon_decay_rate": epsilon_decay_rate,
         }
+        if accelerated_training:
+            self.q_learning_options["accelerated"] = True
         self.acp = None
         self.delta = None
         if self.fixed_C is None:
@@ -79,9 +88,10 @@ class ConformallyRobustController:
                 "quantile_max": quantile_max,
             }
             # Validate calibration settings before any potentially expensive pilot run.
-            validated = ACP([0.0], **self.acp_options)
+            scores = [0.0] if calibration_scores is None else calibration_scores
+            validated = ACP(scores, **self.acp_options)
             if calibration_scores is not None:
-                self.acp = ACP(calibration_scores, **self.acp_options)
+                self.acp = validated
                 self.initial_calibration_scores = list(self.acp.scores)
             elif self.pilot_episodes == 0:
                 raise ValueError("Provide calibration_scores or set pilot_episodes > 0.")
@@ -100,7 +110,7 @@ class ConformallyRobustController:
         for episode in range(-self.pilot_episodes, 0):
             if self.episode_setup is not None:
                 self.episode_setup(self, episode)
-            record = self.deployment_env.deploy_policy(random_policy, self.gamma)
+            record = self.deployment_env.deploy_policy(random_policy)
             self.pilot_scores.append(record["score"])
         self.acp = ACP(self.pilot_scores, **self.acp_options)
         self.initial_calibration_scores = list(self.acp.scores)
@@ -109,26 +119,31 @@ class ConformallyRobustController:
         """Train and deploy once, then update uncertainty from this episode only."""
         if self.fixed_C is None:
             self.initialize_calibration()
-        settings = {}
-        if self.episode_setup is not None:
-            settings = self.episode_setup(self, len(self.history))
+        settings = {} if self.episode_setup is None else self.episode_setup(self, len(self.history))
         R_used = self.R_hat if self.fixed_R is None else self.fixed_R
         C_used = self.acp.quantile() if self.fixed_C is None else self.fixed_C
         Tabular_Agent._validate_uncertainty(R_used, C_used)
-        reused = self.fixed_R is not None and self.fixed_C is not None and self.agent is not None
+        reused = (
+            self.fixed_R is not None and self.fixed_C is not None and self.agent is not None
+            and self.agent.diagnostics.get("converged", False)
+        )
         if not reused:
-            self.agent = Tabular_Agent(
-                self.training_env, R=R_used, C=C_used, seed=self._next_seed(),
-                **self.agent_options,
-            )
+            training_seed = self._next_seed()
+            self.agent = Tabular_Agent(self.training_env, R=R_used, C=C_used)
+            initial_Q = None
+            if self.q_initializer is not None:
+                initial_Q = self.q_initializer(self.training_env, R_used, C_used)
             self.Q, self.policy = self.agent.robust_q_learning(
-                self.training_episodes, exploring_starts=True, record_every=100,
+                self.max_training_episodes, exploring_starts=True, record_every=100,
+                initial_Q=initial_Q,
+                tolerance=self.training_tolerance, check_every=self.training_check_every,
+                seed=training_seed, **self.q_learning_options,
             )
-        record = self.deployment_env.deploy_policy(self.policy, self.gamma)
+        record = self.deployment_env.deploy_policy(self.policy)
         record.update({
             "episode": len(self.history) + 1, "R_used": R_used,
             "C_used": float(C_used),
-            "training": self.agent.training_diagnostics.copy(), "training_reused": reused,
+            "training": self.agent.diagnostics.copy(), "training_reused": reused,
         })
         if self.fixed_R is None:
             self.transition_count += len(record["actions"])
