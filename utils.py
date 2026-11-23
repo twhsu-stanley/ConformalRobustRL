@@ -36,8 +36,25 @@ def _format_mean_std(values):
     return f"{np.mean(values):.4f} +/- {spread}"
 
 
+def _acp_coverage_data(acp_runs):
+    """Compute trial coverage curves and their common finite-K lower bound."""
+    settings = np.asarray([
+        (run["delta"], run["eta"], run["history"][0]["delta_k"]) for run in acp_runs
+    ])
+    if not np.allclose(settings, settings[0], rtol=0, atol=1e-12):
+        raise ValueError("ACP coverage comparison requires common delta, eta, and delta_1.")
+    delta, eta, delta_1 = settings[0]
+    indicators = np.asarray([
+        [row["score"] <= row["C_hat"] for row in run["history"]] for run in acp_runs
+    ])
+    episodes = np.arange(1, indicators.shape[1] + 1)
+    cumulative_coverage = np.cumsum(indicators, axis=1) / episodes
+    lower_bound = 1 - delta - (eta + delta_1) / (episodes * eta)
+    return episodes, cumulative_coverage, lower_bound, settings[0]
+
+
 def print_online_summary(runs, method_labels):
-    """Print the experiment setup, result table, training convergence, and R estimates."""
+    """Print setup, policy performance, training convergence, R accuracy, and ACP coverage."""
     mdp = runs[0]["mdp"]
     episode_counts = [len(run["history"]) for run in runs]
     episodes = str(min(episode_counts))
@@ -76,11 +93,21 @@ def print_online_summary(runs, method_labels):
     }))
     print(f"Q-learning runs converged: {converged_run_count:,}/{len(training_records):,}; "
           f"tolerance={tolerances}; maximum residual={max_bellman_residual:.6g}")
-    estimated = [run for run in runs if run["fixed_R"] is None]
-    if estimated:
-        final_R = [run["history"][-1]["R_hat_next"] for run in estimated]
-        print(f"Final R estimate: {_format_mean_std(final_R)} across {len(estimated)} trials; "
-              f"initial estimate={estimated[0]['history'][0]['R_used']:g}")
+    r_estimation_runs = [run for run in runs if run["fixed_R"] is None]
+    if r_estimation_runs:
+        final_R = [run["history"][-1]["R_hat_next"] for run in r_estimation_runs]
+        print(f"Final R estimate: {_format_mean_std(final_R)} "
+              f"across {len(r_estimation_runs)} trials; "
+              f"initial estimate={r_estimation_runs[0]['history'][0]['R_used']:g}")
+    acp_runs = [run for run in runs if run["fixed_C"] is None]
+    if acp_runs:
+        episodes, cumulative_coverage, lower_bound, settings = _acp_coverage_data(acp_runs)
+        delta, eta, delta_1 = settings
+        print(f"ACP cumulative coverage at K={episodes[-1]}: "
+              f"{_format_mean_std(cumulative_coverage[:, -1])} "
+              "(trial mean +/- sample SD)")
+        print(f"ACP target={1 - delta:.4f}; finite-K lower bound={lower_bound[-1]:.4f}")
+        print(f"ACP settings: delta={delta:g}, eta={eta:g}, delta_1={delta_1:g}")
 
 def _set_plot_limits(axes, *, xlim=None, ylim=None):
     """Set optional limits; dict keys select zero-based axes."""
@@ -93,7 +120,7 @@ def _set_plot_limits(axes, *, xlim=None, ylim=None):
             axis.set_ylim(y_limits)
 
 
-def _plot_acp_coverage(run, axis):
+def _plot_acp_scores_quantile(run, axis):
     """Draw first-trial scores and ACP predictions on the supplied axis."""
     history = run["history"]
     episodes = np.arange(1, len(history) + 1)
@@ -116,13 +143,13 @@ def _plot_acp_coverage(run, axis):
 
 
 def plot_acp(runs, *, xlim=None, ylim=None):
-    """Return independent coverage and adaptive-delta figures for the first trial."""
+    """Return independent score/quantile and adaptive-delta figures for the first trial."""
     import matplotlib.pyplot as plt
 
-    coverage, coverage_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
+    scores_quantile, scores_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     delta, delta_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     run = runs[0]
-    _plot_acp_coverage(run, coverage_axis)
+    _plot_acp_scores_quantile(run, scores_axis)
     history = run["history"]
     episodes = np.arange(1, len(history) + 1)
 
@@ -131,8 +158,25 @@ def plot_acp(runs, *, xlim=None, ylim=None):
     delta_axis.set(title="Adaptive failure parameter, first trial",
                    xlabel="Deployment episode k", ylabel="Failure parameter")
 
-    _set_plot_limits((coverage_axis, delta_axis), xlim=xlim, ylim=ylim)
-    return coverage, delta
+    _set_plot_limits((scores_axis, delta_axis), xlim=xlim, ylim=ylim)
+    return scores_quantile, delta
+
+
+def plot_acp_empirical_coverage(runs, *, xlim=None, ylim=None, axis=None):
+    """Plot cumulative episode coverage across trials against the finite-K lower bound."""
+    import matplotlib.pyplot as plt
+
+    episodes, cumulative_coverage, lower_bound, settings = _acp_coverage_data(runs)
+    delta = settings[0]
+    if axis is None:
+        _, axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
+    axis.plot(episodes, cumulative_coverage.T, color="C0", alpha=0.2)
+    axis.plot(episodes, cumulative_coverage.mean(axis=0), color="C0", label="Mean coverage")
+    axis.axhline(1 - delta, color="black", linestyle="--", label=r"Target $1-\delta$")
+    axis.plot(episodes, lower_bound, color="C3", linestyle=":", label="Theoretical lower bound")
+    axis.set(title="ACP empirical coverage", xlabel="Deployment episodes K", ylabel="Coverage")
+    _set_plot_limits(axis, xlim=xlim, ylim=ylim)
+    return axis.figure
 
 
 def plot_R(runs, R_star=None, *, xlim=None, ylim=None, axis=None):
@@ -156,13 +200,13 @@ def plot_R(runs, R_star=None, *, xlim=None, ylim=None, axis=None):
     return axis.figure
 
 
-def plot_R_acp(estimated_runs, calibrated_runs, *, xlim=None, ylim=None):
-    """Combine R estimates and first-trial ACP coverage in a 1-by-2 figure."""
+def plot_R_acp(r_estimation_runs, acp_runs, *, xlim=None, ylim=None):
+    """Combine R estimates and cumulative ACP coverage across trials in a 1-by-2 figure."""
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(1, 2, figsize=(10, 5), constrained_layout=True)
-    plot_R(estimated_runs, axis=axes[0])
-    _plot_acp_coverage(calibrated_runs[0], axes[1])
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
+    plot_R(r_estimation_runs, axis=axes[0])
+    plot_acp_empirical_coverage(acp_runs, axis=axes[1])
     _set_plot_limits(axes, xlim=xlim, ylim=ylim)
     return fig
 

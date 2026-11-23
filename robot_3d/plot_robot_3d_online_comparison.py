@@ -12,7 +12,7 @@ if not __package__:
 
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
 from utils import load_online_results, plot_R, plot_acp, plot_R_acp, plot_performance
-from utils import print_online_summary
+from utils import plot_acp_empirical_coverage, print_online_summary
 
 
 plt.rcParams.update({
@@ -39,20 +39,25 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"No online comparison results found in {output_dir}.")
     print_online_summary(runs, METHOD_LABELS)
     episode_xlim = (0, max(len(run["history"]) for run in runs))
-    estimated = [run for run in runs if run["fixed_R"] is None]
-    calibrated = [run for run in runs if run["fixed_C"] is None]
-    # Set limits here; for ACP, dict keys 0/1 select the coverage/delta figures.
+    r_estimation_runs = [run for run in runs if run["fixed_R"] is None]
+    acp_runs = [run for run in runs if run["fixed_C"] is None]
+    # Set limits here; for plot_acp, keys 0/1 select the scores/quantile and delta figures.
     figures = {
         "policy_comparison": plot_performance(runs, METHOD_LABELS, xlim=episode_xlim, ylim=(0, 0.2))
     }
-    if estimated:
-        figures["r_estimation"] = plot_R(estimated, xlim=episode_xlim, ylim=(0, 0.6))
-    if calibrated:
-        figures["acp_coverage"], figures["acp_delta_k"] = plot_acp(
-            calibrated, xlim=episode_xlim, ylim=None,
+    if r_estimation_runs:
+        figures["r_estimation"] = plot_R(r_estimation_runs, xlim=episode_xlim, ylim=(0, 0.6))
+    if acp_runs:
+        figures["acp_scores_quantile"], figures["acp_delta_k"] = plot_acp(
+            acp_runs, xlim=episode_xlim, ylim=None,
         )
-    if estimated and calibrated:
-        figures["r_acp"] = plot_R_acp(estimated, calibrated, xlim=episode_xlim, ylim={0: (0, 0.6)})
+        figures["acp_empirical_converage"] = plot_acp_empirical_coverage(
+            acp_runs, xlim=episode_xlim, ylim=(0, 1),
+        )
+    if r_estimation_runs and acp_runs:
+        figures["r_acp"] = plot_R_acp(
+            r_estimation_runs, acp_runs, xlim=episode_xlim, ylim={0: (0, 0.6), 1: (0, 1)},
+        )
     for name, fig in figures.items():
         for axis in fig.axes:
             axis.grid(alpha=0.25, axis="y")
