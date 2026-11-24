@@ -13,17 +13,17 @@ from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 if __name__ == "__main__":
     n_cases = 100
     lr_init = 0.9
-    step_start_decay_lr = 100000
+    step_start_decay_lr = 800000
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
     algorithm = "robust_q_learning" # Or "robust_value_iteration" #
-    tolerance = 1e-3
-    reference_tolerance = 1e-10
+    convergence_tol = 1e-5
+    q_star_reference_tol = 1e-8
     seed = 2026  # Set None for new random cases on each run.
     n_obstacles = (250, 400)
-    max_iterations = 10000
-    max_training_episodes = 100000
+    max_iterations = 8000000
+    max_training_episodes = 8000000
     check_every = 100
     accelerated = True  # Use the existing Numba backend for Q-learning.
     root = Path(__file__).resolve().parent / "saved_results"
@@ -40,7 +40,8 @@ if __name__ == "__main__":
         template, dataset_path, checkpoint_path, n_cases=n_cases, n_obstacles=n_obstacles,
         lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
         epsilon_init=epsilon_init, epsilon_lb=epsilon_lb, epsilon_decay_rate=epsilon_decay_rate,
-        algorithm=algorithm, tolerance=tolerance, reference_tolerance=reference_tolerance,
+        algorithm=algorithm, convergence_tol=convergence_tol,
+        q_star_reference_tol=q_star_reference_tol,
         max_iterations=max_iterations, max_training_episodes=max_training_episodes,
         check_every=check_every, seed=seed, accelerated=accelerated, output_dir=output_dir,
     )

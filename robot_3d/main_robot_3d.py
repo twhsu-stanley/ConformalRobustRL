@@ -14,12 +14,17 @@ from Tabular_Agent import Tabular_Agent
 
 
 if __name__ == "__main__":
-    max_training_episodes = 200000
+    lr_init = 0.9
+    step_start_decay_lr = 800000
+    epsilon_init = 0.1
+    epsilon_lb = 0.01
+    epsilon_decay_rate = 0.999
+    convergence_tol = 1e-5
+    max_training_episodes = 8000000
+    check_every = 100
     n_trials = 15
     horizon = 100
     seed = 7
-    training_tolerance = 1e-6
-    training_check_every = 1000
     output_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
 
     checkpoint_path = Path(__file__).resolve().parent / "saved_results/q_transformer/checkpoint"
@@ -52,9 +57,10 @@ if __name__ == "__main__":
             agent = Tabular_Agent(mdp, R=R, C=C)
             agent.robust_q_learning(
                 max_training_episodes, record_every=1, initial_Q=initial_Q,
-                tolerance=training_tolerance, check_every=training_check_every,
-                lr_init=0.9, step_start_decay_lr=100000,
-                epsilon_init=0.1, epsilon_lb=0.01, epsilon_decay_rate=0.999,
+                convergence_tol=convergence_tol, check_every=check_every,
+                lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
+                epsilon_init=epsilon_init, epsilon_lb=epsilon_lb,
+                epsilon_decay_rate=epsilon_decay_rate,
                 seed=None if seed is None else seed + trial,
             )
             evaluation_return.append(agent.evaluation_return.copy())

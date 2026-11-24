@@ -66,8 +66,8 @@ def _q_errors(Q, reference, active):
 
 def compare_initializations(
     mdp, checkpoint_path, *, R, C, lr_init, step_start_decay_lr, epsilon_init, epsilon_lb,
-    epsilon_decay_rate, seed, algorithm="robust_value_iteration", tolerance=1e-6,
-    reference_tolerance=1e-10, max_iterations=10000, max_training_episodes=200000,
+    epsilon_decay_rate, seed, algorithm="robust_value_iteration", convergence_tol=1e-5,
+    q_star_reference_tol=1e-8, max_iterations=10000, max_training_episodes=200000,
     check_every=100, predictor=None, accelerated=True,
 ):
     """Measure paired solves against an independent, more accurate VI reference.
@@ -78,8 +78,8 @@ def compare_initializations(
     """
     if algorithm not in ALGORITHMS:
         raise ValueError(f"algorithm must be one of {ALGORITHMS}.")
-    if not np.isfinite(reference_tolerance) or not 0 < reference_tolerance < tolerance:
-        raise ValueError("reference_tolerance must be positive and stricter than tolerance.")
+    if not np.isfinite(q_star_reference_tol) or not 0 < q_star_reference_tol < convergence_tol:
+        raise ValueError("q_star_reference_tol must be positive and stricter than convergence_tol.")
     if seed is None:
         seed = int(np.random.default_rng().integers(2**32))
     if predictor is None:
@@ -88,7 +88,7 @@ def compare_initializations(
         predictor = QTransformerPredictor(checkpoint_path)
     reference_agent = Tabular_Agent(mdp.clone(nominal=True), R=R, C=C)
     reference, _ = reference_agent.robust_value_iteration(
-        tolerance=reference_tolerance, max_iterations=max_iterations,
+        convergence_tol=q_star_reference_tol, max_iterations=max_iterations,
     )
     prediction = np.asarray(predictor(mdp, R, C), dtype=float).copy()
     if prediction.shape != reference.shape or not np.all(np.isfinite(prediction)):
@@ -102,11 +102,12 @@ def compare_initializations(
         try:
             if algorithm == "robust_value_iteration":
                 agent.robust_value_iteration(
-                    initial_Q=initial, tolerance=tolerance, max_iterations=max_iterations,
+                    initial_Q=initial, convergence_tol=convergence_tol,
+                    max_iterations=max_iterations,
                 )
             else:
                 agent.robust_q_learning(
-                    max_training_episodes, initial_Q=initial, tolerance=tolerance,
+                    max_training_episodes, initial_Q=initial, convergence_tol=convergence_tol,
                     check_every=check_every, seed=seed, exploring_starts=True,
                     record_every=max_training_episodes * mdp.max_episode_steps,
                     lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
@@ -187,9 +188,9 @@ def plot_initialization_comparison(results):
 
 def evaluate_initializations(
     template, dataset_path, checkpoint_path, *, n_cases=10, n_obstacles, seed=2026,
-    algorithm="robust_value_iteration", tolerance=1e-6, reference_tolerance=1e-10,
+    algorithm="robust_value_iteration", convergence_tol=1e-5, q_star_reference_tol=1e-8,
     max_iterations=10000, max_training_episodes=200000, check_every=100,
-    lr_init=.5, step_start_decay_lr=10000000, epsilon_init=1., epsilon_lb=.01,
+    lr_init=.9, step_start_decay_lr=10000000, epsilon_init=.1, epsilon_lb=.01,
     epsilon_decay_rate=.999, accelerated=True, output_dir=None,
 ):
     """Sample a configurable number of cases, load the predictor once, and report paired results."""
@@ -202,7 +203,8 @@ def evaluate_initializations(
 
     predictor = QTransformerPredictor(checkpoint_path)
     options = dict(
-        algorithm=algorithm, tolerance=tolerance, reference_tolerance=reference_tolerance,
+        algorithm=algorithm, convergence_tol=convergence_tol,
+        q_star_reference_tol=q_star_reference_tol,
         max_iterations=max_iterations, max_training_episodes=max_training_episodes,
         check_every=check_every, lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
         epsilon_init=epsilon_init, epsilon_lb=epsilon_lb, epsilon_decay_rate=epsilon_decay_rate,
@@ -212,7 +214,8 @@ def evaluate_initializations(
                                  "R_range": bounds[0], "C_range": bounds[1]}, "cases": []}
     print(f"{algorithm}: {n_cases} unseen maps; R in {bounds[0]}, C in {bounds[1]}; "
           f"parameters sampled at {PROMPT_DECIMALS} decimals.")
-    print(f"Convergence residual <= {tolerance:g}; reference residual <= {reference_tolerance:g}.")
+    print(f"Convergence residual <= {convergence_tol:g}; "
+          f"reference residual <= {q_star_reference_tol:g}.")
     print("Global steps count nominal transitions for Q-learning and individual backups for VI.")
     for index, case in enumerate(cases, 1):
         result = compare_initializations(checkpoint_path=checkpoint_path, predictor=predictor,

@@ -142,8 +142,8 @@ def _build_training_tables(base, C):
 
 def run_robust_q_learning(
     agent, max_training_episodes, *, lr_init, step_start_decay_lr, epsilon_init, epsilon_lb,
-    epsilon_decay_rate, seed, exploring_starts, record_every, initial_Q, tolerance, check_every,
-    verbose,
+    epsilon_decay_rate, seed, exploring_starts, record_every, initial_Q, convergence_tol,
+    check_every, verbose,
 ):
     """Train the supplied Tabular_Agent using its MDP, R, C, and initial Q-table.
 
@@ -175,7 +175,7 @@ def run_robust_q_learning(
         agent.Q, values, rows, successors, base.rewards, offsets, neighbors,
         agent.R, base.gamma, global_set,
     )
-    while residual > tolerance and episodes < max_training_episodes:
+    while residual > convergence_tol and episodes < max_training_episodes:
         # End each batch at a residual check or a shuffle of the exploring starts.
         count = min(check_every - episodes % check_every, max_training_episodes - episodes)
         if exploring_starts:
@@ -202,7 +202,7 @@ def run_robust_q_learning(
     agent.visit_counts = visits
     active_visits = visits[~base.terminal_mask]
     agent._record_diagnostics(
-        "robust_q_learning", global_steps, residual, tolerance, episodes=episodes,
+        "robust_q_learning", global_steps, residual, convergence_tol, episodes=episodes,
         minimum_visits=int(active_visits.min()), unvisited_pairs=int((active_visits == 0).sum()),
         initial_state_value=float(values[start_row]), zero_initialized=zero_initialized,
         backend="numba_grid",
@@ -210,6 +210,6 @@ def run_robust_q_learning(
     if not agent.diagnostics["converged"]:
         raise RuntimeError(
             f"Q-learning did not converge in {max_training_episodes} episodes: "
-            f"Bellman residual {residual:.3g} exceeds tolerance {tolerance:.3g}."
+            f"Bellman residual {residual:.3g} exceeds convergence_tol {convergence_tol:.3g}."
         )
     return agent.Q.copy(), np.argmax(agent.Q, axis=1)

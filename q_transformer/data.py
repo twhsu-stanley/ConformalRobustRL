@@ -117,13 +117,13 @@ def grid_cell_spans(text):
     return spans
 
 
-def _solve_map(mdp, conditions, tolerance, max_iterations, progress=None):
+def _solve_map(mdp, conditions, convergence_tol, max_iterations, progress=None):
     """Solve every R/C combination in one process, reusing the map's uncertainty cache."""
     targets, residuals = [], []
     for R, C in conditions:
         agent = Tabular_Agent(mdp, R=R, C=C)
         Q, _ = agent.robust_value_iteration(
-            tolerance=tolerance, max_iterations=max_iterations,
+            convergence_tol=convergence_tol, max_iterations=max_iterations,
         )
         targets.append(Q)
         residuals.append(agent.diagnostics["bellman_residual"])
@@ -134,7 +134,7 @@ def _solve_map(mdp, conditions, tolerance, max_iterations, progress=None):
 
 def generate_q_data(
     mdps, R_values, C_values, output_path, *, n_maps=None, n_workers=1,
-    tolerance=1e-8, max_iterations=10000,
+    convergence_tol=1e-8, max_iterations=10000,
 ):
     """Save numeric Q targets and structured parameters for each distinct map.
 
@@ -200,9 +200,12 @@ def generate_q_data(
             map_index = len(maps)
             maps.append({name: parameters[name] for name in MDP_MAP_FIELDS})
             if executor is None:
-                collect(map_index, _solve_map(mdp, conditions, tolerance, max_iterations, progress))
+                result = _solve_map(mdp, conditions, convergence_tol, max_iterations, progress)
+                collect(map_index, result)
             else:
-                future = executor.submit(_solve_map, mdp, conditions, tolerance, max_iterations)
+                future = executor.submit(
+                    _solve_map, mdp, conditions, convergence_tol, max_iterations,
+                )
                 pending.append((map_index, future))
                 if len(pending) >= 2 * n_workers:
                     index, future = pending.popleft()

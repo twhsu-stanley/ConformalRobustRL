@@ -40,12 +40,14 @@ if __name__ == "__main__":
 
     n_deployment_episodes = 100
     horizon = 100
-    max_training_episodes = 20000
-    lr_init = 0.5
-    step_start_decay_lr = 10000
+    lr_init = 0.9
+    step_start_decay_lr = 40000
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
+    convergence_tol = 1e-5
+    max_training_episodes = 2000000
+    check_every = 100
     R_hat_init = 0.1
     delta = 0.1
     delta_1 = None
@@ -61,8 +63,6 @@ if __name__ == "__main__":
     C_star = 1.3
     min_radius = np.linalg.norm(mdp.cell_widths) / 2
     verbose = True
-    training_tolerance = 1e-6
-    training_check_every = 100
     seeds = (23, 67, 87, 101, 922, 1009, 2027, 3037, 4049, 5051,
              6067, 7079, 8089, 9091, 10093)
     first_trial = 1
@@ -95,7 +95,7 @@ if __name__ == "__main__":
             controller = ConformallyRobustController(
                 mdp, horizon=horizon, training_horizon=horizon,
                 max_training_episodes=max_training_episodes, R_hat_init=R_hat_init,
-                training_tolerance=training_tolerance, training_check_every=training_check_every,
+                convergence_tol=convergence_tol, training_check_every=check_every,
                 lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
                 epsilon_init=epsilon_init, epsilon_lb=epsilon_lb,
                 epsilon_decay_rate=epsilon_decay_rate,

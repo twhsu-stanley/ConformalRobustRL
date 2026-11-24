@@ -82,26 +82,26 @@ class Tabular_Agent:
                 residual = max(residual, abs(target - self.Q[row, action]))
         return float(residual)
 
-    def _record_diagnostics(self, algorithm, global_steps, residual, tolerance, **details):
+    def _record_diagnostics(self, algorithm, global_steps, residual, convergence_tol, **details):
         """Use one result schema for current and future tabular solvers."""
         self.diagnostics = {
             "algorithm": algorithm, "global_steps": int(global_steps),
-            "bellman_residual": float(residual), "tolerance": float(tolerance),
-            "converged": bool(residual <= tolerance), "R": float(self.R), "C": float(self.C),
+            "bellman_residual": float(residual), "convergence_tol": float(convergence_tol),
+            "converged": bool(residual <= convergence_tol), "R": float(self.R), "C": float(self.C),
             **details,
         }
 
-    def robust_value_iteration(self, *, tolerance=1e-8, max_iterations=10000, initial_Q=None):
+    def robust_value_iteration(self, *, convergence_tol=1e-5, max_iterations=10000, initial_Q=None):
         """Solve synchronously from zeros or initial_Q; reject unconverged solutions."""
-        if not np.isfinite(tolerance) or tolerance <= 0:
-            raise ValueError("tolerance must be positive and finite.")
+        if not np.isfinite(convergence_tol) or convergence_tol <= 0:
+            raise ValueError("convergence_tol must be positive and finite.")
         if not isinstance(max_iterations, (int, np.integer)) or max_iterations < 1:
             raise ValueError("max_iterations must be a positive integer.")
         base = self.env.unwrapped
         self.initialize_q(initial_Q)
         residual = self.robust_bellman_residual()
         iteration = 0
-        while residual > tolerance and iteration < max_iterations:
+        while residual > convergence_tol and iteration < max_iterations:
             iteration += 1
             values = self.Q.max(axis=1)
             updated = np.zeros_like(self.Q)
@@ -113,23 +113,23 @@ class Tabular_Agent:
                     updated[row, action] = self.robust_td_target(reward, successor, values)
             change = float(np.max(np.abs(updated - self.Q)))
             self.Q[:] = updated
-            if change <= tolerance or iteration == max_iterations:
+            if change <= convergence_tol or iteration == max_iterations:
                 residual = self.robust_bellman_residual()
         self._record_diagnostics(
             "robust_value_iteration", iteration * len(base.trainable_states) * self.n_action,
-            residual, tolerance, iterations=iteration,
+            residual, convergence_tol, iterations=iteration,
         )
         if not self.diagnostics["converged"]:
             raise RuntimeError(
                 f"Value iteration did not converge in {max_iterations} iterations: "
-                f"Bellman residual {residual:.3g} exceeds tolerance {tolerance:.3g}."
+                f"Bellman residual {residual:.3g} exceeds convergence_tol {convergence_tol:.3g}."
             )
         return self.Q.copy(), np.argmax(self.Q, axis=1)
 
     def robust_q_learning(
-        self, max_training_episodes, *, lr_init, step_start_decay_lr=10000, epsilon_init=1.0,
+        self, max_training_episodes, *, lr_init, step_start_decay_lr=10000, epsilon_init=0.1,
         epsilon_lb=0.01, epsilon_decay_rate=0.999, seed=None, exploring_starts=None,
-        record_every=1, verbose=False, initial_Q=None, tolerance=1e-6, check_every=100,
+        record_every=1, verbose=False, initial_Q=None, convergence_tol=1e-5, check_every=100,
         accelerated=False,
     ):
         """Algorithm 1, with customizable initialization and a deterministic nominal simulator.
@@ -138,7 +138,7 @@ class Tabular_Agent:
         by each pair's own post-warmup visit count. Infinite visits consequently
         give an infinite learning-rate sum for each learnable pair. Terminal rows
         are fixed at zero; time-limit truncation does not suppress bootstrapping.
-        Stop when the full Bellman residual meets tolerance. max_training_episodes is a
+        Stop when the full Bellman residual meets convergence_tol. max_training_episodes is a
         safety cap; reaching it without convergence raises an error.
         """
         for name, value in (
@@ -147,8 +147,8 @@ class Tabular_Agent:
         ):
             if not isinstance(value, (int, np.integer)) or value < 1:
                 raise ValueError(f"{name} must be a positive integer.")
-        if not np.isfinite(tolerance) or tolerance <= 0:
-            raise ValueError("tolerance must be positive and finite.")
+        if not np.isfinite(convergence_tol) or convergence_tol <= 0:
+            raise ValueError("convergence_tol must be positive and finite.")
         if not np.isfinite(lr_init) or not 0 < lr_init < 1:
             raise ValueError("lr_init must be in (0, 1).")
         if not 0 <= epsilon_lb <= epsilon_init <= 1 or not 0 < epsilon_decay_rate <= 1:
@@ -172,7 +172,7 @@ class Tabular_Agent:
                 step_start_decay_lr=step_start_decay_lr, epsilon_init=epsilon_init,
                 epsilon_lb=epsilon_lb, epsilon_decay_rate=epsilon_decay_rate, seed=seed,
                 exploring_starts=exploring_starts, record_every=record_every, initial_Q=initial_Q,
-                tolerance=tolerance, check_every=check_every, verbose=verbose,
+                convergence_tol=convergence_tol, check_every=check_every, verbose=verbose,
             )
         self.initialize_q(initial_Q)
         rng = np.random.default_rng(seed)
@@ -191,7 +191,7 @@ class Tabular_Agent:
                 (base.state_index(state), action) for state in base.trainable_states
                 for action in range(self.n_action)
             ])
-        while residual > tolerance and episodes < max_training_episodes:
+        while residual > convergence_tol and episodes < max_training_episodes:
             if verbose:
                 print(f"Episode {episodes + 1}/{max_training_episodes}")
             options = None
@@ -233,7 +233,7 @@ class Tabular_Agent:
         self.visit_counts = visits
         learnable_visits = visits[~base.terminal_mask]
         self._record_diagnostics(
-            "robust_q_learning", cumulative_step, residual, tolerance, episodes=episodes,
+            "robust_q_learning", cumulative_step, residual, convergence_tol, episodes=episodes,
             minimum_visits=int(np.min(learnable_visits)),
             unvisited_pairs=int(np.count_nonzero(learnable_visits == 0)),
             initial_state_value=base.values_at(base.start_state, values),
@@ -242,7 +242,7 @@ class Tabular_Agent:
         if not self.diagnostics["converged"]:
             raise RuntimeError(
                 f"Q-learning did not converge in {max_training_episodes} episodes: "
-                f"Bellman residual {residual:.3g} exceeds tolerance {tolerance:.3g}."
+                f"Bellman residual {residual:.3g} exceeds convergence_tol {convergence_tol:.3g}."
             )
         if verbose:
             print(f"Converged after {episodes} episodes; Bellman residual={residual:.3g}.")

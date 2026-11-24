@@ -25,17 +25,17 @@ class ConformallyRobustController:
     Indices are zero-based online and negative for the initial pilot episodes.
     q_initializer(mdp, R_used, C_used) optionally returns the initial Q-table;
     the predictor remains outside the agent and saved experiment results.
-    max_training_episodes caps Algorithm 1; training_tolerance controls convergence.
+    max_training_episodes caps Algorithm 1; convergence_tol controls convergence.
     """
 
     def __init__(
         self, mdp, *, horizon=100, max_training_episodes=20000,
-        training_tolerance=1e-6, training_check_every=100,
+        convergence_tol=1e-5, training_check_every=100,
         training_horizon=100, R_hat_init=0.1, delta=0.1, delta_1=None,
         eta=0.01, quantile_max=3.0, calibration_scores=None, calibration_window=100,
         pilot_episodes=20,
-        lr_init=0.5, step_start_decay_lr=100000, epsilon_init=1.0, epsilon_lb=0.1,
-        epsilon_decay_rate=0.995, seed=None, R=None, C=None,
+        lr_init=0.9, step_start_decay_lr=100000, epsilon_init=0.1, epsilon_lb=0.01,
+        epsilon_decay_rate=0.999, seed=None, R=None, C=None,
         episode_setup=None, q_initializer=None, accelerated_training=False,
     ):
         Tabular_Agent._validate_uncertainty(R_hat_init if R is None else R, 0 if C is None else C)
@@ -49,11 +49,11 @@ class ConformallyRobustController:
             minimum = 0 if name == "pilot_episodes" else 1
             if not isinstance(value, (int, np.integer)) or value < minimum:
                 raise ValueError(f"{name} must be an integer of at least {minimum}.")
-        if not np.isfinite(training_tolerance) or training_tolerance <= 0:
-            raise ValueError("training_tolerance must be positive and finite.")
+        if not np.isfinite(convergence_tol) or convergence_tol <= 0:
+            raise ValueError("convergence_tol must be positive and finite.")
         self.horizon = int(horizon)
         self.max_training_episodes = int(max_training_episodes)
-        self.training_tolerance = float(training_tolerance)
+        self.convergence_tol = float(convergence_tol)
         self.training_check_every = int(training_check_every)
         self.pilot_episodes = int(pilot_episodes) if C is None else 0
         self.fixed_R = None if R is None else float(R)
@@ -136,7 +136,7 @@ class ConformallyRobustController:
             self.Q, self.policy = self.agent.robust_q_learning(
                 self.max_training_episodes, exploring_starts=True, record_every=100,
                 initial_Q=initial_Q,
-                tolerance=self.training_tolerance, check_every=self.training_check_every,
+                convergence_tol=self.convergence_tol, check_every=self.training_check_every,
                 seed=training_seed, **self.q_learning_options,
             )
         record = self.deployment_env.deploy_policy(self.policy)

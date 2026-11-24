@@ -23,8 +23,13 @@ if __name__ == "__main__":
     n_obstacles = (250, 400)
     seed = 7
     n_workers = 8
+    q_star_reference_tol = 1e-8
+    max_iterations = 8000000
 
     dataset_path = Path(__file__).resolve().parent / "saved_results/q_transformer/q_data_3d.npz"
     maps = training_maps(mdp, n_maps, n_obstacles=n_obstacles, seed=seed)
-    generate_q_data(maps, R_values, C_values, dataset_path, n_maps=n_maps, n_workers=n_workers)
+    generate_q_data(
+        maps, R_values, C_values, dataset_path, n_maps=n_maps, n_workers=n_workers,
+        convergence_tol=q_star_reference_tol, max_iterations=max_iterations,
+    )
     print(f"Saved Q-table dataset to {dataset_path}")

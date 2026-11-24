@@ -88,11 +88,12 @@ def print_online_summary(runs, method_labels):
     converged_run_count = sum(training_record["converged"] for training_record in training_records)
     max_bellman_residual = max(training_record["bellman_residual"]
                               for training_record in training_records)
-    tolerances = ", ".join(f"{value:g}" for value in sorted({
-        training_record["tolerance"] for training_record in training_records
+    convergence_tols = ", ".join(f"{value:g}" for value in sorted({
+        training_record.get("convergence_tol", training_record.get("tolerance"))
+        for training_record in training_records
     }))
     print(f"Q-learning runs converged: {converged_run_count:,}/{len(training_records):,}; "
-          f"tolerance={tolerances}; maximum residual={max_bellman_residual:.6g}")
+          f"convergence_tol={convergence_tols}; maximum residual={max_bellman_residual:.6g}")
     r_estimation_runs = [run for run in runs if run["fixed_R"] is None]
     if r_estimation_runs:
         final_R = [run["history"][-1]["R_hat_next"] for run in r_estimation_runs]
