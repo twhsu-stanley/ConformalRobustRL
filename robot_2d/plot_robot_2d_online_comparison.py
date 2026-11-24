@@ -46,7 +46,7 @@ if __name__ == "__main__":
     acp_runs = [run for run in runs if run["fixed_C"] is None]
     # Set limits here; for plot_acp, keys 0/1 select the scores/quantile and delta figures.
     figures = {
-        "policy_comparison": plot_performance(runs, METHOD_LABELS, xlim=episode_xlim, ylim=(0, 0.5))
+        "policy_comparison": plot_performance(runs, METHOD_LABELS, xlim=episode_xlim, ylim=(0, 0.3))
     }
     if r_estimation_runs:
         figures["r_estimation"] = plot_R(r_estimation_runs, xlim=episode_xlim, ylim=(0, 1))
