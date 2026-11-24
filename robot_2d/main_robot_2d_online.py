@@ -13,6 +13,7 @@ if not __package__:
 from conformally_robust_controller import ConformallyRobustController
 from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 from robot_2d.utils_2d import sample_deviation_2d
+from utils import print_and_save_summary, print_online_summary
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -81,6 +82,7 @@ if __name__ == "__main__":
     if not np.isfinite(R_star) or not 0 < R_star < 1:
         raise ValueError("R_star must be in (0, 1) for the directional-noise experiment.")
 
+    runs = []
     for trial, trial_seed in enumerate(seeds, first_trial):
         for index, method in enumerate(methods):
             seed = trial_seed + 100000 * index
@@ -135,6 +137,7 @@ if __name__ == "__main__":
             filename = output_dir / f"results_{test_name}.pkl"
             with filename.open("wb") as file:
                 pickle.dump(results, file)
+            runs.append(results)
 
             if save_plots:
                 import matplotlib
@@ -150,3 +153,9 @@ if __name__ == "__main__":
                 plt.close(fig)
             if verbose:
                 print(f"Saved results to {filename.resolve()}")
+
+    if runs:
+        method_labels = {method: settings[2] for method, settings in METHOD_SETTINGS.items()}
+        print_and_save_summary(
+            output_dir / "online_summary.txt", print_online_summary, runs, method_labels,
+        )

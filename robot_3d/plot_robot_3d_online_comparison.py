@@ -12,7 +12,7 @@ if not __package__:
 
 from robot_3d.main_robot_3d_online import METHOD_SETTINGS
 from utils import load_online_results, plot_R, plot_acp, plot_R_acp, plot_performance
-from utils import plot_acp_empirical_coverage, print_online_summary
+from utils import plot_acp_empirical_coverage, print_and_save_summary, print_online_summary
 
 
 plt.rcParams.update({
@@ -37,7 +37,9 @@ if __name__ == "__main__":
     runs = load_online_results(output_dir, METHOD_SETTINGS)
     if not runs:
         raise FileNotFoundError(f"No online comparison results found in {output_dir}.")
-    print_online_summary(runs, METHOD_LABELS)
+    print_and_save_summary(
+        output_dir / "online_summary.txt", print_online_summary, runs, METHOD_LABELS,
+    )
     episode_xlim = (0, max(len(run["history"]) for run in runs))
     r_estimation_runs = [run for run in runs if run["fixed_R"] is None]
     acp_runs = [run for run in runs if run["fixed_C"] is None]

@@ -3,6 +3,24 @@
 import numpy as np
 
 
+def print_and_save_summary(output_path, print_summary, *args, **kwargs):
+    """Print a final summary and optionally save the same output as plain text."""
+    from contextlib import redirect_stdout
+    from io import StringIO
+    from pathlib import Path
+
+    output = StringIO()
+    with redirect_stdout(output):
+        result = print_summary(*args, **kwargs)
+    summary = output.getvalue()
+    print(summary, end="")
+    if output_path is not None:
+        output_path = Path(output_path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(summary, encoding="utf-8")
+    return result
+
+
 def calc_evaluation_return_mean_std(evaluation_return):
     """Average full curves, holding each stopped learner at its final value."""
     curves = [np.asarray(curve, dtype=float) for curve in evaluation_return]

@@ -14,6 +14,7 @@ from conformally_robust_controller import ConformallyRobustController
 from generate_grid_maps import training_maps
 from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 from robot_3d.utils_3d import sample_deviation_3d
+from utils import print_and_save_summary, print_online_summary
 
 METHOD_SETTINGS = {
     "proposed": (None, None, "Proposed"),
@@ -75,6 +76,7 @@ if __name__ == "__main__":
 
     mdp.noise_sampler = partial(sample_deviation_3d, R_star=R_star, cell_widths=mdp.cell_widths)
 
+    runs = []
     for trial, trial_seed in enumerate(seeds, first_trial):
         for index, method in enumerate(methods):
             seed = trial_seed + 100000 * index
@@ -123,6 +125,7 @@ if __name__ == "__main__":
             filename = output_dir / f"results_{test_name}.pkl"
             with filename.open("wb") as file:
                 pickle.dump(results, file)
+            runs.append(results)
 
             if save_plots:
                 import matplotlib
@@ -138,3 +141,9 @@ if __name__ == "__main__":
                 plt.close(fig)
             if verbose:
                 print(f"Saved results to {filename.resolve()}")
+
+    if runs:
+        method_labels = {method: settings[2] for method, settings in METHOD_SETTINGS.items()}
+        print_and_save_summary(
+            output_dir / "online_summary.txt", print_online_summary, runs, method_labels,
+        )

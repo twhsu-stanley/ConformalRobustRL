@@ -7,6 +7,7 @@ import numpy as np
 from generate_grid_maps import training_maps
 from q_transformer.data import MDP_SHARED_FIELDS, PROMPT_DECIMALS, mdp_data
 from Tabular_Agent import Tabular_Agent
+from utils import print_and_save_summary
 
 
 ALGORITHMS = ("robust_value_iteration", "robust_q_learning")
@@ -225,7 +226,10 @@ def evaluate_initializations(
         print(f"Case {index:>3}/{n_cases}: R={case['R']:.2f}, C={case['C']:.2f}; "
               f"steps zero/warm={zero['global_steps']:,}/{warm['global_steps']:,}; "
               f"converged={zero['converged']}/{warm['converged']}", flush=True)
-    results["summary"] = summarize_initializations(results)
+    summary_path = None
+    if output_dir is not None:
+        summary_path = Path(output_dir) / f"transformer_evaluation_{algorithm}.txt"
+    results["summary"] = print_and_save_summary(summary_path, summarize_initializations, results)
     if output_dir is not None:
         import matplotlib.pyplot as plt
 
