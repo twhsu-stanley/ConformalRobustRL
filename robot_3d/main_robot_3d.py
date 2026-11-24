@@ -53,8 +53,8 @@ if __name__ == "__main__":
             agent.robust_q_learning(
                 max_training_episodes, record_every=1, initial_Q=initial_Q,
                 tolerance=training_tolerance, check_every=training_check_every,
-                lr_init=0.5, step_start_decay_lr=10000000,
-                epsilon_init=1.0, epsilon_lb=0.1, epsilon_decay_rate=0.995,
+                lr_init=0.9, step_start_decay_lr=100000,
+                epsilon_init=0.1, epsilon_lb=0.01, epsilon_decay_rate=0.999,
                 seed=None if seed is None else seed + trial,
             )
             evaluation_return.append(agent.evaluation_return.copy())

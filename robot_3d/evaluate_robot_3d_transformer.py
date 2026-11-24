@@ -13,7 +13,7 @@ from robot_3d.robot_3d_motion_mdp import Robot3DMotionMDP
 if __name__ == "__main__":
     n_cases = 100
     lr_init = 0.9
-    step_start_decay_lr = 10000000
+    step_start_decay_lr = 100000
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999

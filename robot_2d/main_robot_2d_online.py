@@ -42,7 +42,7 @@ if __name__ == "__main__":
     horizon = 100
     max_training_episodes = 20000
     lr_init = 0.5
-    step_start_decay_lr = 10000000
+    step_start_decay_lr = 10000
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999

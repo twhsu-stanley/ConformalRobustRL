@@ -13,7 +13,7 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 if __name__ == "__main__":
     n_cases = 100
     lr_init = 0.5
-    step_start_decay_lr = 10000000
+    step_start_decay_lr = 10000
     epsilon_init = 0.1
     epsilon_lb = 0.01
     epsilon_decay_rate = 0.999
