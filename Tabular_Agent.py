@@ -149,8 +149,8 @@ class Tabular_Agent:
                 raise ValueError(f"{name} must be a positive integer.")
         if not np.isfinite(convergence_tol) or convergence_tol <= 0:
             raise ValueError("convergence_tol must be positive and finite.")
-        if not np.isfinite(lr_init) or not 0 < lr_init < 1:
-            raise ValueError("lr_init must be in (0, 1).")
+        if not np.isfinite(lr_init) or not 0 < lr_init:
+            raise ValueError("lr_init must be a positive finite number.")
         if not 0 <= epsilon_lb <= epsilon_init <= 1 or not 0 < epsilon_decay_rate <= 1:
             raise ValueError("Invalid epsilon-greedy schedule.")
         if step_start_decay_lr < 0:

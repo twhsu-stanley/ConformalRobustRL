@@ -8,3 +8,5 @@ saved_results/
 tests/
 *.png
 *.pdf
+
+plot_robot_online_comparison.py
