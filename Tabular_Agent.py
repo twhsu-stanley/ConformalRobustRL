@@ -128,12 +128,15 @@ class Tabular_Agent:
 
     def robust_q_learning(
         self, max_training_episodes, *, lr_init, step_start_decay_lr=10000, epsilon_init=0.1,
-        epsilon_lb=0.01, epsilon_decay_rate=0.999, seed=None, exploring_starts=None,
+        epsilon_lb=0.01, epsilon_decay_rate=0.999, seed=None, exploring_starts=True,
         record_every=1, verbose=False, initial_Q=None, convergence_tol=1e-5, check_every=100,
         accelerated=False,
     ):
         """Algorithm 1, with customizable initialization and a deterministic nominal simulator.
 
+        By default, episodes cycle through shuffled nonterminal state-action pairs,
+        forcing the first action. Set exploring_starts=False to reset each episode to
+        the configured start state and use epsilon-greedy exploration from the first action.
         Learning rates stay constant during the initial global warmup, then decay
         by each pair's own post-warmup visit count. Infinite visits consequently
         give an infinite learning-rate sum for each learnable pair. Terminal rows
@@ -155,6 +158,8 @@ class Tabular_Agent:
             raise ValueError("Invalid epsilon-greedy schedule.")
         if step_start_decay_lr < 0:
             raise ValueError("step_start_decay_lr must be nonnegative.")
+        if not isinstance(exploring_starts, (bool, np.bool_)):
+            raise ValueError("exploring_starts must be True or False.")
         base = self.env.unwrapped
         if hasattr(base, "is_nominal") and not base.is_nominal:
             raise ValueError("Algorithm 1 requires a deterministic nominal training environment.")
@@ -162,8 +167,6 @@ class Tabular_Agent:
             transitions = (items for row in base.P.values() for items in row.values())
             if any(len(items) != 1 or items[0][0] != 1 for items in transitions):
                 raise ValueError("Robust Q-learning requires deterministic nominal transitions.")
-        if exploring_starts is None:
-            exploring_starts = True
         if accelerated:
             from numba_grid_q_learning import run_robust_q_learning
 
@@ -237,7 +240,7 @@ class Tabular_Agent:
             minimum_visits=int(np.min(learnable_visits)),
             unvisited_pairs=int(np.count_nonzero(learnable_visits == 0)),
             initial_state_value=base.values_at(base.start_state, values),
-            zero_initialized=zero_initialized,
+            zero_initialized=zero_initialized, exploring_starts=bool(exploring_starts),
         )
         if not self.diagnostics["converged"]:
             raise RuntimeError(

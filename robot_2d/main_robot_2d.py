@@ -62,7 +62,7 @@ if __name__ == "__main__":
                 f"  initial Bellman error={initial_bellman_error:.6g}", flush=True,
             )
             agent.robust_q_learning(
-                max_training_episodes, record_every=1, initial_Q=agent.Q,
+                max_training_episodes, exploring_starts=True, record_every=1, initial_Q=agent.Q,
                 convergence_tol=convergence_tol, check_every=check_every,
                 lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
                 epsilon_init=epsilon_init, epsilon_lb=epsilon_lb,

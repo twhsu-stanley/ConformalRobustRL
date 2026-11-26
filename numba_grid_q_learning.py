@@ -205,7 +205,7 @@ def run_robust_q_learning(
         "robust_q_learning", global_steps, residual, convergence_tol, episodes=episodes,
         minimum_visits=int(active_visits.min()), unvisited_pairs=int((active_visits == 0).sum()),
         initial_state_value=float(values[start_row]), zero_initialized=zero_initialized,
-        backend="numba_grid",
+        exploring_starts=bool(exploring_starts), backend="numba_grid",
     )
     if not agent.diagnostics["converged"]:
         raise RuntimeError(

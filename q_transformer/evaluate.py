@@ -69,13 +69,15 @@ def compare_initializations(
     mdp, checkpoint_path, *, R, C, lr_init, step_start_decay_lr, epsilon_init, epsilon_lb,
     epsilon_decay_rate, seed, algorithm="robust_value_iteration", convergence_tol=1e-5,
     q_star_reference_tol=1e-8, max_iterations=10000, max_training_episodes=200000,
-    check_every=100, predictor=None, accelerated=True,
+    check_every=100, predictor=None, accelerated=True, exploring_starts=True,
 ):
     """Measure paired solves against an independent, more accurate VI reference.
 
     Q-learning counts nominal training transitions; VI counts nonterminal
     state-action backups. Reference generation, inference and residual checks
     do not enter either update counter. Terminal Q entries are fixed at zero.
+    Both initializations use the same Q-learning settings and episode-start mode.
+    Exploring starts are the default; False resets to the configured start state.
     """
     if algorithm not in ALGORITHMS:
         raise ValueError(f"algorithm must be one of {ALGORITHMS}.")
@@ -109,7 +111,7 @@ def compare_initializations(
             else:
                 agent.robust_q_learning(
                     max_training_episodes, initial_Q=initial, convergence_tol=convergence_tol,
-                    check_every=check_every, seed=seed, exploring_starts=True,
+                    check_every=check_every, seed=seed, exploring_starts=exploring_starts,
                     record_every=max_training_episodes * mdp.max_episode_steps,
                     lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
                     epsilon_init=epsilon_init, epsilon_lb=epsilon_lb,
@@ -131,6 +133,16 @@ def summarize_initializations(results):
     cases = results["cases"]
     complete = [c for c in cases if c["zero"]["converged"] and c["warm"]["converged"]]
     summary = {"complete_pairs": len(complete), "n_cases": len(cases)}
+    configuration = results.get("configuration", {})
+    if cases and cases[0]["zero"].get("algorithm") == "robust_q_learning":
+        starts = "exploring starts" if cases[0]["zero"]["exploring_starts"] else "start state"
+        print(f"Episode starts: {starts}.")
+        keys = (
+            "lr_init", "step_start_decay_lr", "epsilon_init", "epsilon_lb", "epsilon_decay_rate",
+        )
+        settings = ", ".join(f"{key}={configuration[key]}" for key in keys if key in configuration)
+        if settings:
+            print(f"Q-learning (both initializations): {settings}")
     print("\nErrors use nonterminal Q entries; terminal entries are fixed at zero.")
     print(f"Complete convergence pairs: {len(complete)}/{len(cases)}; failures "
           f"zero/warm: {sum(not c['zero']['converged'] for c in cases)}/"
@@ -162,6 +174,8 @@ def summarize_initializations(results):
         print(f"Median convergence steps, zero/warm: {np.median(zero):,.0f}/{np.median(warm):,.0f}")
         if reduction is not None:
             print(f"Aggregate step reduction: {reduction:+.2f}% (positive favors warm start).")
+    else:
+        print("No complete convergence pairs; step reduction is undefined.")
     print("Step statistics use complete pairs only; initial-error statistics use every case.")
     return summary
 
@@ -179,6 +193,9 @@ def plot_initialization_comparison(results):
         zero, warm = (np.array([c[m][metric] for c in cases]) for m in ("zero", "warm"))
         limit = max(float(zero.max(initial=0)), float(warm.max(initial=0))) * 1.05 or 1.0
         axis.scatter(zero, warm, s=25, alpha=.8)
+        if metric == "global_steps" and not cases:
+            axis.text(.5, .5, "No complete convergence pairs", transform=axis.transAxes,
+                      ha="center", va="center")
         axis.plot([0, limit], [0, limit], "k--", linewidth=1)
         axis.set(title=f"{title} (n={len(cases)})", xlabel="Zero initialization",
                  ylabel="Transformer warm start", xlim=(0, limit), ylim=(0, limit))
@@ -192,7 +209,7 @@ def evaluate_initializations(
     algorithm="robust_value_iteration", convergence_tol=1e-5, q_star_reference_tol=1e-8,
     max_iterations=10000, max_training_episodes=200000, check_every=100,
     lr_init=.9, step_start_decay_lr=10000000, epsilon_init=.1, epsilon_lb=.01,
-    epsilon_decay_rate=.999, accelerated=True, output_dir=None,
+    epsilon_decay_rate=.999, accelerated=True, exploring_starts=True, output_dir=None,
 ):
     """Sample a configurable number of cases, load the predictor once, and report paired results."""
     if algorithm not in ALGORITHMS:
@@ -209,7 +226,7 @@ def evaluate_initializations(
         max_iterations=max_iterations, max_training_episodes=max_training_episodes,
         check_every=check_every, lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
         epsilon_init=epsilon_init, epsilon_lb=epsilon_lb, epsilon_decay_rate=epsilon_decay_rate,
-        accelerated=accelerated,
+        accelerated=accelerated, exploring_starts=exploring_starts,
     )
     results = {"configuration": {**options, "n_cases": n_cases, "seed": seed,
                                  "R_range": bounds[0], "C_range": bounds[1]}, "cases": []}
