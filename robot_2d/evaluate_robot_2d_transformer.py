@@ -21,7 +21,7 @@ if __name__ == "__main__":
     exploring_starts = True  # False resets to the start state; True uses exploring starts.
     convergence_tol = 1e-5
     q_star_reference_tol = 1e-8
-    seed = 41100  # Set None to sample new cases without retuning the settings.
+    seed = 23  # Set None to sample new cases without retuning the settings.
     n_obstacles = (25, 40)
     max_iterations = 1000000 # for robust_value_iteration
     max_training_episodes = 8000000 # for robust_q_learning
