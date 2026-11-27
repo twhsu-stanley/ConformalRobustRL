@@ -3,6 +3,8 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
+from utils import set_plot_style
+
 
 def sample_deviation_2d(nominal_position, rng, *, radius, R_star, peak_angles, min_radius=None):
     """Mix zero error with uniform slip lengths and five von Mises directions.
@@ -71,6 +73,7 @@ def plot_robot_map(mdp, axis):
 
 def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion", *, value_format=".2f"):
     """Plot values, direction commands, and an optional continuous trajectory."""
+    set_plot_style()
     fig, axes = plt.subplots(1, 2, figsize=(12, 6), constrained_layout=True)
     extent = (0, mdp.bounds[0], 0, mdp.bounds[1])
     values = np.max(Q, axis=1).reshape(mdp.ny, mdp.nx)
@@ -127,6 +130,7 @@ def plot_trajectories(runs, method_label):
     """Overlay all trials on their shared map, coloring each path by deployment episode."""
     if not runs or not any(run["history"] for run in runs):
         raise ValueError("At least one deployment episode is required for plotting.")
+    set_plot_style()
     mdp = runs[0]["mdp"]
     episode_count = max(len(run["history"]) for run in runs)
     trajectory_count = sum(len(run["history"]) for run in runs)

@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.special import ndtri
 
+from utils import set_plot_style
+
 
 def sample_deviation_3d(nominal_position, rng, *, R_star, cell_widths=(1., 1., 1.)):
     """Draw a Gaussian error using fresh uniform simplex weights at every step.
@@ -51,7 +53,7 @@ def plot_robot_map(mdp, axis):
     ):
         position = mdp.coordinates(state)
         axis.scatter(*position, color=color, s=55)
-        axis.text(*position, label, fontsize=12, weight="bold")
+        axis.text(*position, label, fontsize=1.5 * plt.rcParams["font.size"], weight="bold")
     axis.set(xlim=(0, mdp.bounds[0]), ylim=(0, mdp.bounds[1]), zlim=(0, mdp.bounds[2]),
              xlabel="x", ylabel="y", zlabel="z")
     axis.set_box_aspect(mdp.bounds.copy())
@@ -59,6 +61,7 @@ def plot_robot_map(mdp, axis):
 
 def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
     """Plot workspace values, six-direction policy arrows, and an optional trajectory."""
+    set_plot_style()
     fig = plt.figure(figsize=(14, 6), constrained_layout=True)
     axes = [fig.add_subplot(1, 2, index, projection="3d") for index in (1, 2)]
     for axis in axes:
@@ -84,6 +87,7 @@ def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion"):
 
 def plot_robot_3d_tabular(mdp, agent, *, z_layers=None, show=True):
     """Plot value/policy slices; triangles mark +z/-z actions in the policy panels."""
+    set_plot_style()
     if agent.Q.shape != (mdp.n_state, mdp.action_space.n):
         raise ValueError("The agent Q-table must match the MDP state and action spaces.")
     if z_layers is None:

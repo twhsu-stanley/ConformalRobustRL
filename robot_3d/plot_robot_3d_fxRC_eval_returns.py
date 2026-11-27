@@ -10,13 +10,14 @@ import numpy as np
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from utils import calc_evaluation_return_mean_std
+from utils import calc_evaluation_return_mean_std, set_plot_style
 
 
 if __name__ == "__main__":
     data_dir = Path(__file__).resolve().parent / "saved_results/fixedRC"
     show = True
 
+    set_plot_style()
     comparisons = (
         (
             "Fixed C = 1.0", ((0.0, 1.0), (0.1, 1.0), (0.2, 1.0)),

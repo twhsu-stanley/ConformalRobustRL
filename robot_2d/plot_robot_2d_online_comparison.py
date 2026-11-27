@@ -16,19 +16,6 @@ from utils import load_online_results, plot_R, plot_acp, plot_R_acp, plot_perfor
 from utils import plot_acp_empirical_coverage, print_and_save_summary, print_online_summary
 
 
-plt.rcParams.update({
-    "font.size": 14,
-    "axes.titlesize": 18,
-    "axes.labelsize": 16,
-    "xtick.labelsize": 14,
-    "ytick.labelsize": 14,
-    "legend.fontsize": 14,
-    "figure.titlesize": 20,
-    "pdf.fonttype": 42,
-    "ps.fonttype": 42,
-})
-
-
 METHOD_LABELS = {method: settings[2] for method, settings in METHOD_SETTINGS.items()}
 
 

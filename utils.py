@@ -3,6 +3,24 @@
 import numpy as np
 
 
+def set_plot_style():
+    """Use 16-point titles and 14-point labels, legends, and ticks in every figure."""
+    import matplotlib.pyplot as plt
+
+    plt.rcParams.update({
+        "font.size": 14,
+        "axes.titlesize": 16,
+        "axes.labelsize": 14,
+        "xtick.labelsize": 14,
+        "ytick.labelsize": 14,
+        "legend.fontsize": 14,
+        "legend.title_fontsize": 14,
+        "figure.titlesize": 16,
+        "pdf.fonttype": 42,
+        "ps.fonttype": 42,
+    })
+
+
 def print_and_save_summary(output_path, print_summary, *args, **kwargs):
     """Print a final summary and optionally save the same output as plain text."""
     from contextlib import redirect_stdout
@@ -165,6 +183,7 @@ def plot_acp(runs, *, xlim=None, ylim=None):
     """Return independent score/quantile and adaptive-delta figures for the first trial."""
     import matplotlib.pyplot as plt
 
+    set_plot_style()
     scores_quantile, scores_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     delta, delta_axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     run = runs[0]
@@ -185,15 +204,17 @@ def plot_acp_empirical_coverage(runs, *, xlim=None, ylim=None, axis=None):
     """Plot cumulative episode coverage across trials against the finite-K lower bound."""
     import matplotlib.pyplot as plt
 
+    set_plot_style()
     episodes, cumulative_coverage, lower_bound, settings = _acp_coverage_data(runs)
     delta = settings[0]
     if axis is None:
         _, axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     axis.plot(episodes, cumulative_coverage.T, color="C0", alpha=0.2)
-    axis.plot(episodes, cumulative_coverage.mean(axis=0), color="C0", label="Mean coverage")
+    axis.plot(episodes, cumulative_coverage.mean(axis=0), color="C0", linewidth=3,
+              label="cumulative coverage")
     axis.axhline(1 - delta, color="black", linestyle="--", label=r"Target $1-\delta$")
-    axis.plot(episodes, lower_bound, color="C3", linestyle=":", label="Theoretical lower bound")
-    axis.set(title="ACP empirical coverage", xlabel="Deployment episodes K", ylabel="Coverage")
+    axis.plot(episodes, lower_bound, color="C3", linestyle=":", label="ACP coverage lower bound")
+    axis.set(title="Cumulative empirical ACP coverage", xlabel="Deployment episode k", ylabel="")
     _set_plot_limits(axis, xlim=xlim, ylim=ylim)
     return axis.figure
 
@@ -202,6 +223,7 @@ def plot_R(runs, R_star=None, *, xlim=None, ylim=None, axis=None):
     """Compare cumulative R estimates with the common true R-star."""
     import matplotlib.pyplot as plt
 
+    set_plot_style()
     if axis is None:
         _, axis = plt.subplots(figsize=(6, 4), constrained_layout=True)
     estimates = []
@@ -212,9 +234,10 @@ def plot_R(runs, R_star=None, *, xlim=None, ylim=None, axis=None):
         estimates.append(estimate)
         axis.plot(np.arange(1, len(estimate) + 1), estimate, color="C0", alpha=0.25)
     episodes = np.arange(1, len(estimates[0]) + 1)
-    axis.plot(episodes, np.mean(estimates, axis=0), label=r"Estimated $\hat{R}_{k+1}$")
+    axis.plot(episodes, np.mean(estimates, axis=0), color="C0", linewidth=3,
+              label=r"Estimated $\widehat{R}_k$")
     axis.axhline(np.mean(R_star), color="black", linestyle=":", label=r"True $R^\star$")
-    axis.set(title="R estimation", xlabel="Deployment episode k", ylabel="Probability")
+    axis.set(title="Mismatch probability estimation", xlabel="Deployment episode k", ylabel="")
     _set_plot_limits(axis, xlim=xlim, ylim=ylim)
     return axis.figure
 
@@ -223,7 +246,8 @@ def plot_R_acp(r_estimation_runs, acp_runs, *, xlim=None, ylim=None):
     """Combine R estimates and cumulative ACP coverage across trials in a 1-by-2 figure."""
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4), constrained_layout=True)
+    set_plot_style()
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3), constrained_layout=True)
     plot_R(r_estimation_runs, axis=axes[0])
     plot_acp_empirical_coverage(acp_runs, axis=axes[1])
     _set_plot_limits(axes, xlim=xlim, ylim=ylim)
@@ -234,6 +258,7 @@ def plot_performance(runs, method_labels, *, xlim=None, ylim=None):
     """Plot averaged cumulative returns; print_online_summary reports the outcome statistics."""
     import matplotlib.pyplot as plt
 
+    set_plot_style()
     fig, axis = plt.subplots(figsize=(10, 5), constrained_layout=True)
     methods = list(dict.fromkeys(run["method"] for run in runs))
     for index, method in enumerate(methods):
@@ -245,6 +270,7 @@ def plot_performance(runs, method_labels, *, xlim=None, ylim=None):
         averages = np.cumsum(returns, axis=1) / episodes
         axis.plot(episodes, averages.T, color=color, alpha=0.2)
         axis.plot(episodes, np.mean(averages, axis=0), color=color, label=label)
-    axis.set(title="Cumulative mean discounted reward", xlabel="Online episode", ylabel="Reward")
+    axis.set(title="Policy comparison", xlabel="Deployment episode k",
+             ylabel="Cumulative mean\ndiscounted returns")
     _set_plot_limits(axis, xlim=xlim, ylim=ylim)
     return fig

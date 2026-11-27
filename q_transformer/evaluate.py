@@ -7,7 +7,7 @@ import numpy as np
 from generate_grid_maps import training_maps
 from q_transformer.data import MDP_SHARED_FIELDS, PROMPT_DECIMALS, mdp_data
 from Tabular_Agent import Tabular_Agent
-from utils import print_and_save_summary
+from utils import print_and_save_summary, set_plot_style
 
 
 ALGORITHMS = ("robust_value_iteration", "robust_q_learning")
@@ -200,6 +200,7 @@ def plot_initialization_comparison(results):
     """Show paired errors and convergence work; points below the diagonal favor warm start."""
     import matplotlib.pyplot as plt
 
+    set_plot_style()
     figure, axes = plt.subplots(1, 2, figsize=(8, 4), constrained_layout=True)
     for axis, metric, title in zip(axes, ("initial_error_rmse", "global_steps"),
                                    ("RMSE(Q_init, Q*)", "Total Steps to Convergence")):
@@ -213,9 +214,11 @@ def plot_initialization_comparison(results):
             axis.text(.5, .5, "No complete convergence pairs", transform=axis.transAxes,
                       ha="center", va="center")
         axis.plot([0, limit], [0, limit], "k--", linewidth=1)
-        axis.set(title=f"{title} (n={len(cases)})", xlabel="Zero initialization",
+        axis.set(title=f"{title}\n(n={len(cases)})", xlabel="Zero initialization",
                  ylabel="Transformer warm start", xlim=(0, limit), ylim=(0, limit))
         axis.set_aspect("equal", adjustable="box")
+        if metric == "global_steps":
+            axis.locator_params(axis="both", nbins=3)
     figure.suptitle("Below the diagonal favors the transformer")
     return figure
 
