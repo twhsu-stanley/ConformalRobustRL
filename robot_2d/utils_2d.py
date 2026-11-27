@@ -50,9 +50,9 @@ def plot_robot_map(mdp, axis):
         ix, iy = state
         color = "0.25" if mdp.obstacle_mask[iy, ix] else "none"
         if state == mdp.start_state:
-            color = "lightskyblue"
+            color = "green"
         elif state == mdp.goal_state:
-            color = "lightgreen"
+            color = "red"
         rectangle = plt.Rectangle(
             (ix * mdp.cell_widths[0], iy * mdp.cell_widths[1]), *mdp.cell_widths,
             facecolor=color, edgecolor="0.6", linewidth=0.7,
@@ -64,7 +64,8 @@ def plot_robot_map(mdp, axis):
     axis.set_yticks(np.linspace(0, mdp.bounds[1], mdp.ny + 1))
     for state, label in ((mdp.start_state, "S"), (mdp.goal_state, "G")):
         x, y = mdp.coordinates(state)
-        axis.text(x, y, label, ha="center", va="center", weight="bold")
+        axis.text(x, y, label, ha="center", va="center", weight="bold",
+                  fontsize=1.5 * plt.rcParams["font.size"])
 
 
 def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion", *, value_format=".2f"):
@@ -137,9 +138,8 @@ def plot_trajectories(runs, method_label):
             trajectory = np.asarray(row["positions"])
             axis.plot(trajectory[:, 0], trajectory[:, 1], color=cmap(norm(episode)),
                       linewidth=0.5, alpha=0.1)
-    ticks = np.unique(np.linspace(1, episode_count, min(6, episode_count), dtype=int))
-    fig.colorbar(plt.cm.ScalarMappable(norm=norm, cmap=cmap), ax=axis,
-                 ticks=ticks, label="Deployment episode")
-    axis.set_title(f"{method_label}: {len(runs)} trials\n"
-                   f"{trajectory_count:,} deployment trajectories")
+    axis.set_title(
+        f"{method_label}\n{len(runs)} trials $\\times$ {episode_count} episodes/trial"
+        f" = {trajectory_count:,} total episodes", pad=12,
+    )
     return fig
