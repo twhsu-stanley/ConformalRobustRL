@@ -14,14 +14,14 @@ if __name__ == "__main__":
     n_cases = 100
     lr_init = 1.0
     step_start_decay_lr = 230000
-    epsilon_init = 0.01
-    epsilon_lb = 0.01
+    epsilon_init = 0.1
+    epsilon_lb = 0.1
     epsilon_decay_rate = 1.0
     algorithm = "robust_q_learning" # or "robust_value_iteration" #
     exploring_starts = True  # False resets to the start state; True uses exploring starts.
     convergence_tol = 1e-5
     q_star_reference_tol = 1e-8
-    seed = 14410  # Set None to sample new cases without retuning the settings.
+    seed = 21465  # Set None to sample new cases without retuning the settings.
     n_obstacles = (250, 400)
     max_iterations = 8000000 # for robust_value_iteration
     max_training_episodes = 10000000 # for robust_q_learning

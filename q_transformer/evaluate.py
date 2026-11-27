@@ -12,14 +12,15 @@ from utils import print_and_save_summary
 
 ALGORITHMS = ("robust_value_iteration", "robust_q_learning")
 ERROR_METRICS = ("initial_error_inf", "initial_error_rmse")
+OUTLIER_SIGMA = 6
 
 
 def _map_key(start, goal, obstacles):
     return tuple(start), tuple(goal), np.asarray(obstacles, dtype=bool).tobytes()
 
 
-def sample_test_cases(template, dataset_path, *, n_cases, n_obstacles, seed):
-    """Sample unseen maps and uniformly sample the two-decimal R/C grid in dataset bounds."""
+def _test_case_stream(template, dataset_path, *, n_cases, n_obstacles, seed):
+    """Return a lazy seeded case stream and the dataset's R/C bounds."""
     if not isinstance(n_cases, (int, np.integer)) or isinstance(n_cases, bool) or n_cases < 1:
         raise ValueError("n_cases must be a positive integer.")
     parameters = mdp_data(template)
@@ -42,21 +43,34 @@ def sample_test_cases(template, dataset_path, *, n_cases, n_obstacles, seed):
     parameter_rng = np.random.default_rng(parameter_stream)
     learning_rng = np.random.default_rng(learning_stream)
     map_seed = int(map_stream.generate_state(1)[0])
-    cases = []
-    maps = training_maps(template, n_cases + len(excluded), n_obstacles=n_obstacles, seed=map_seed)
-    for mdp in maps:
-        key = _map_key(mdp.start_state, mdp.goal_state, mdp.obstacle_mask)
-        if key in excluded:
-            continue
-        excluded.add(key)
-        R, C = parameter_rng.integers(low.astype(int), high.astype(int) + 1) / scale
-        cases.append({
-            "mdp": mdp, "R": float(R), "C": float(C),
-            "seed": int(learning_rng.integers(2**32)),
-        })
-        if len(cases) == n_cases:
-            return cases, bounds
-    raise RuntimeError("Could not sample enough distinct maps outside the training dataset.")
+
+    def generate():
+        sampled = 0
+        maps = training_maps(
+            template, n_cases + len(excluded), n_obstacles=n_obstacles, seed=map_seed,
+        )
+        for mdp in maps:
+            key = _map_key(mdp.start_state, mdp.goal_state, mdp.obstacle_mask)
+            if key in excluded:
+                continue
+            excluded.add(key)
+            R, C = parameter_rng.integers(low.astype(int), high.astype(int) + 1) / scale
+            sampled += 1
+            yield {"mdp": mdp, "R": float(R), "C": float(C),
+                   "seed": int(learning_rng.integers(2**32))}
+            if sampled == n_cases:
+                return
+        raise RuntimeError("Could not sample enough distinct maps outside the training dataset.")
+
+    return generate(), bounds
+
+
+def sample_test_cases(template, dataset_path, *, n_cases, n_obstacles, seed):
+    """Sample unseen maps and uniformly sample the two-decimal R/C grid in dataset bounds."""
+    cases, bounds = _test_case_stream(
+        template, dataset_path, n_cases=n_cases, n_obstacles=n_obstacles, seed=seed,
+    )
+    return list(cases), bounds
 
 
 def _q_errors(Q, reference, active):
@@ -128,14 +142,67 @@ def compare_initializations(
     return result
 
 
+def _discard_samples(cases):
+    """Remove failed pairs and pairs outside either initialization's mean +/- 5 sample SD."""
+    complete = [c for c in cases if c["zero"]["converged"] and c["warm"]["converged"]]
+    bounds = {}
+    if len(complete) > 1:
+        for name in ("zero", "warm"):
+            steps = np.array([c[name]["global_steps"] for c in complete], dtype=float)
+            mean, width = steps.mean(), OUTLIER_SIGMA * steps.std(ddof=1)
+            bounds[name] = mean - width, mean + width
+    retained, discarded = [], []
+    for case in cases:
+        reasons = [f"{name} did not converge" for name in ("zero", "warm")
+                   if not case[name]["converged"]]
+        if not reasons:
+            for name, (lower, upper) in bounds.items():
+                steps = case[name]["global_steps"]
+                if steps < lower or steps > upper:
+                    reasons.append(
+                        f"{name} steps={steps:,} outside {OUTLIER_SIGMA}-sigma "
+                        f"[{lower:.6g}, {upper:.6g}]"
+                    )
+        if reasons:
+            case["discard_reason"] = "; ".join(reasons)
+            discarded.append(case)
+        else:
+            retained.append(case)
+    return retained, discarded
+
+
+def _format_sample_result(case):
+    """Use one sample ID and format in progress output and the final discarded list."""
+    zero, warm = case["zero"], case["warm"]
+    return (
+        f"Sample {case['sample_id']:>3}: R={case['R']:.2f}, C={case['C']:.2f}."
+        f" zero-initialization/BERT warm-start: steps={zero['global_steps']:,}/{warm['global_steps']:,},"
+        f" converged={zero['converged']}/{warm['converged']},\n           "
+        f" Initial Q max error={zero['initial_error_inf']:.6g}/{warm['initial_error_inf']:.6g},"
+        f" initial Q RMSE={zero['initial_error_rmse']:.6g}/{warm['initial_error_rmse']:.6g}."
+    )
+
+
 def summarize_initializations(results):
-    """Print mean, sample SD, medians and paired wins; retain all failed cases."""
+    """Summarize retained samples and list discarded samples with their reasons last."""
     cases = results["cases"]
     complete = [c for c in cases if c["zero"]["converged"] and c["warm"]["converged"]]
     summary = {"complete_pairs": len(complete), "n_cases": len(cases)}
     configuration = results.get("configuration", {})
-    if cases and cases[0]["zero"].get("algorithm") == "robust_q_learning":
-        starts = "exploring starts" if cases[0]["zero"]["exploring_starts"] else "start state"
+    attempted = results.get("attempted_cases", cases)
+    discarded = results.get("discarded_cases", [])
+    if "attempted_cases" in results:
+        requested = configuration["n_cases"]
+        summary.update(n_attempted=len(attempted), n_discarded=len(discarded))
+        print(f"Samples: requested={requested}; evaluated={len(attempted)}/"
+              f"{configuration['max_samples']}; retained={len(cases)}; discarded={len(discarded)}.")
+        if len(cases) < requested:
+            print(f"Sampling budget exhausted: retained {len(cases)} of {requested} "
+                  "requested samples.")
+    diagnostics = cases[0]["zero"] if cases else {}
+    if configuration.get("algorithm", diagnostics.get("algorithm")) == "robust_q_learning":
+        exploring = configuration.get("exploring_starts", diagnostics.get("exploring_starts", True))
+        starts = "exploring starts" if exploring else "start state"
         print(f"Episode starts: {starts}.")
         keys = (
             "lr_init", "step_start_decay_lr", "epsilon_init", "epsilon_lb", "epsilon_decay_rate",
@@ -144,9 +211,9 @@ def summarize_initializations(results):
         if settings:
             print(f"Q-learning (both initializations): {settings}")
     print("\nErrors use nonterminal Q entries; terminal entries are fixed at zero.")
-    print(f"Complete convergence pairs: {len(complete)}/{len(cases)}; failures "
-          f"zero/warm: {sum(not c['zero']['converged'] for c in cases)}/"
-          f"{sum(not c['warm']['converged'] for c in cases)}")
+    print(f"Complete convergence pairs: {len(complete)}/{len(cases)}; failures zero/warm "
+          f"across all attempts: {sum(not c['zero']['converged'] for c in attempted)}/"
+          f"{sum(not c['warm']['converged'] for c in attempted)}")
     print(f"{'Metric':<22} {'Zero mean +/- SD':>24} {'Warm mean +/- SD':>24} "
           f"{'Warm wins/ties/losses':>23}")
     for metric, label in zip((*ERROR_METRICS, "global_steps"),
@@ -176,7 +243,19 @@ def summarize_initializations(results):
             print(f"Aggregate step reduction: {reduction:+.2f}% (positive favors warm start).")
     else:
         print("No complete convergence pairs; step reduction is undefined.")
-    print("Step statistics use complete pairs only; initial-error statistics use every case.")
+    if "attempted_cases" in results:
+        print("Comparison statistics and plots use retained samples only.")
+        print(f"\nDiscarded samples: {len(discarded)}.")
+        failed = sum(not c["zero"]["converged"] or not c["warm"]["converged"] for c in discarded)
+        print(f"Outlier pairs: {len(discarded) - failed}; nonconverged pairs: {failed}.")
+        for case in sorted(discarded, key=lambda c: c["sample_id"]):
+            print(_format_sample_result(case))
+            print(f"  Discarded: {case['discard_reason']}")
+            for name in ("zero", "warm"):
+                if case[name].get("failure"):
+                    print(f"  {name}: {case[name]['failure']}")
+    else:
+        print("Step statistics use complete pairs only; initial-error statistics use every case.")
     return summary
 
 
@@ -211,12 +290,16 @@ def evaluate_initializations(
     lr_init=.9, step_start_decay_lr=10000000, epsilon_init=.1, epsilon_lb=.01,
     epsilon_decay_rate=.999, accelerated=True, exploring_starts=True, output_dir=None,
 ):
-    """Sample a configurable number of cases, load the predictor once, and report paired results."""
+    """Evaluate n_cases, then replace failed/5-sigma pairs within round(1.5*n_cases) attempts."""
     if algorithm not in ALGORITHMS:
         raise ValueError(f"algorithm must be one of {ALGORITHMS}.")
-    cases, bounds = sample_test_cases(
-        template, dataset_path, n_cases=n_cases, n_obstacles=n_obstacles, seed=seed,
+    if not isinstance(n_cases, (int, np.integer)) or isinstance(n_cases, bool) or n_cases < 1:
+        raise ValueError("n_cases must be a positive integer.")
+    max_samples = round(1.5 * n_cases)
+    cases, bounds = _test_case_stream(
+        template, dataset_path, n_cases=max_samples, n_obstacles=n_obstacles, seed=seed,
     )
+    cases = iter(cases)
     from q_transformer.model import QTransformerPredictor
 
     predictor = QTransformerPredictor(checkpoint_path)
@@ -229,24 +312,35 @@ def evaluate_initializations(
         accelerated=accelerated, exploring_starts=exploring_starts,
     )
     results = {"configuration": {**options, "n_cases": n_cases, "seed": seed,
-                                 "R_range": bounds[0], "C_range": bounds[1]}, "cases": []}
-    print(f"{algorithm}: {n_cases} unseen maps; R in {bounds[0]}, C in {bounds[1]}; "
-          f"parameters sampled at {PROMPT_DECIMALS} decimals.")
-    print(f"Convergence residual <= {convergence_tol:g}; "
-          f"reference residual <= {q_star_reference_tol:g}.")
-    print("Global steps count nominal transitions for Q-learning and individual backups for VI.")
-    for index, case in enumerate(cases, 1):
-        result = compare_initializations(checkpoint_path=checkpoint_path, predictor=predictor,
-                                         **case, **options)
-        results["cases"].append(result)
-        zero, warm = result["zero"], result["warm"]
-        print(f"Case {index:>3}/{n_cases}: R={case['R']:.2f}, C={case['C']:.2f}; "
-              f"steps zero/warm={zero['global_steps']:,}/{warm['global_steps']:,}; "
-              f"converged={zero['converged']}/{warm['converged']}", flush=True)
+                                 "max_samples": max_samples, "outlier_sigma": OUTLIER_SIGMA,
+                                 "R_range": bounds[0], "C_range": bounds[1]},
+               "cases": [], "attempted_cases": [], "discarded_cases": []}
+    sample_output = []
+
+    def report(message):
+        print(message, flush=True)
+        sample_output.append(message)
+
+    report(f"{algorithm}: target {n_cases} retained unseen maps; maximum {max_samples} attempts; "
+           f"R in {bounds[0]}, C in {bounds[1]}.")
+    report(f"Convergence residual <= {convergence_tol:g}; "
+           f"reference residual <= {q_star_reference_tol:g}.")
+    while True:
+        missing = n_cases - len(results["cases"])
+        remaining = max_samples - len(results["attempted_cases"])
+        for _ in range(min(missing, remaining)):
+            result = compare_initializations(checkpoint_path=checkpoint_path, predictor=predictor,
+                                             **next(cases), **options)
+            result["sample_id"] = len(results["attempted_cases"]) + 1
+            results["attempted_cases"].append(result)
+            results["cases"].append(result)
+            report(_format_sample_result(result))
+        results["cases"], discarded = _discard_samples(results["cases"])
+        results["discarded_cases"].extend(discarded)
+        if len(results["cases"]) == n_cases or len(results["attempted_cases"]) == max_samples:
+            break
+
     summary_path = None
-    if output_dir is not None:
-        summary_path = Path(output_dir) / f"transformer_evaluation_{algorithm}.txt"
-    results["summary"] = print_and_save_summary(summary_path, summarize_initializations, results)
     if output_dir is not None:
         import matplotlib.pyplot as plt
 
@@ -256,5 +350,10 @@ def evaluate_initializations(
         for extension in ("png", "pdf"):
             figure.savefig(output_dir / f"transformer_evaluation_{algorithm}.{extension}", dpi=180)
         plt.close(figure)
-        print(f"Saved comparison plots to {output_dir}")
+        report(f"Saved comparison plots to {output_dir}")
+        summary_path = output_dir / f"transformer_evaluation_{algorithm}.txt"
+    results["summary"] = print_and_save_summary(summary_path, summarize_initializations, results)
+    if summary_path is not None:
+        summary = summary_path.read_text(encoding="utf-8")
+        summary_path.write_text("\n".join(sample_output) + "\n" + summary, encoding="utf-8")
     return results

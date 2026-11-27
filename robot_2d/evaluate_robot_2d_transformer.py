@@ -12,7 +12,7 @@ from robot_2d.robot_2d_motion_mdp import Robot2DMotionMDP
 
 if __name__ == "__main__":
     n_cases = 100
-    lr_init = 0.9999
+    lr_init = 1.0
     step_start_decay_lr = 14000
     epsilon_init = 0.1
     epsilon_lb = 0.1
@@ -21,7 +21,7 @@ if __name__ == "__main__":
     exploring_starts = True  # False resets to the start state; True uses exploring starts.
     convergence_tol = 1e-5
     q_star_reference_tol = 1e-8
-    seed = 41102  # Set None to sample new cases without retuning the settings.
+    seed = 41100  # Set None to sample new cases without retuning the settings.
     n_obstacles = (25, 40)
     max_iterations = 1000000 # for robust_value_iteration
     max_training_episodes = 8000000 # for robust_q_learning
