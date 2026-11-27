@@ -50,7 +50,7 @@ def plot_robot_map(mdp, axis):
         ix, iy = state
         color = "0.25" if mdp.obstacle_mask[iy, ix] else "none"
         if state == mdp.start_state:
-            color = "green"
+            color = "blue"
         elif state == mdp.goal_state:
             color = "red"
         rectangle = plt.Rectangle(
@@ -65,7 +65,8 @@ def plot_robot_map(mdp, axis):
     for state, label in ((mdp.start_state, "S"), (mdp.goal_state, "G")):
         x, y = mdp.coordinates(state)
         axis.text(x, y, label, ha="center", va="center", weight="bold",
-                  fontsize=1.5 * plt.rcParams["font.size"])
+                  fontsize=1.5 * plt.rcParams["font.size"],
+                  color="white" if state == mdp.start_state else "black")
 
 
 def plot_robot_motion(mdp, Q, policy, trajectory=None, title="Robot motion", *, value_format=".2f"):
