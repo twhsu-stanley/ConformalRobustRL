@@ -37,14 +37,15 @@ if __name__ == "__main__":
 
     n_deployment_episodes = 100
     horizon = 100
-    lr_init = 0.9
-    step_start_decay_lr = 800000
+    lr_init = 1.0
+    step_start_decay_lr = 230000
     epsilon_init = 0.1
-    epsilon_lb = 0.01
-    epsilon_decay_rate = 0.999
+    epsilon_lb = 0.1
+    epsilon_decay_rate = 1.0
     convergence_tol = 1e-5
-    max_training_episodes = 8000000
-    check_every = 100
+    max_training_episodes = 10000000
+    check_every = 10
+    accelerated = True
     R_hat_init = 0.1
     delta = 0.1
     delta_1 = None
@@ -82,6 +83,11 @@ if __name__ == "__main__":
             seed = trial_seed + 100000 * index
             if method not in METHOD_SETTINGS:
                 raise ValueError(f"Unknown method: {method}.")
+            if verbose:
+                print(
+                    f"\nTrial {trial} (seed={seed}), method={METHOD_SETTINGS[method][2]}",
+                    flush=True,
+                )
             fixed_R, fixed_C = (R, C) if method == "proposed" else METHOD_SETTINGS[method][:2]
             controller = ConformallyRobustController(
                 mdp, horizon=horizon, training_horizon=horizon,
@@ -94,7 +100,7 @@ if __name__ == "__main__":
                 calibration_scores=calibration_scores, calibration_window=calibration_window,
                 pilot_episodes=pilot_episodes, seed=seed, R=fixed_R, C=fixed_C,
                 q_initializer=q_initializer,
-                accelerated_training=True,
+                accelerated_training=accelerated,
             )
             controller.run(n_deployment_episodes, verbose=verbose)
             deployment_mdp = controller.deployment_env

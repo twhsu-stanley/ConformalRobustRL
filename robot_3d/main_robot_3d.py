@@ -14,14 +14,16 @@ from Tabular_Agent import Tabular_Agent
 
 
 if __name__ == "__main__":
-    lr_init = 0.9
-    step_start_decay_lr = 800000
+    lr_init = 1.0
+    step_start_decay_lr = 230000
     epsilon_init = 0.1
-    epsilon_lb = 0.01
-    epsilon_decay_rate = 0.999
+    epsilon_lb = 0.1
+    epsilon_decay_rate = 1.0
     convergence_tol = 1e-5
-    max_training_episodes = 8000000
-    check_every = 100
+    max_training_episodes = 10000000
+    check_every = 10
+    exploring_starts = True
+    accelerated = True
     n_trials = 15
     horizon = 100
     seed = 7
@@ -56,11 +58,12 @@ if __name__ == "__main__":
         for trial in range(n_trials):
             agent = Tabular_Agent(mdp, R=R, C=C)
             agent.robust_q_learning(
-                max_training_episodes, exploring_starts=True, record_every=1, initial_Q=initial_Q,
+                max_training_episodes, exploring_starts=exploring_starts, record_every=1,
+                initial_Q=initial_Q,
                 convergence_tol=convergence_tol, check_every=check_every,
                 lr_init=lr_init, step_start_decay_lr=step_start_decay_lr,
                 epsilon_init=epsilon_init, epsilon_lb=epsilon_lb,
-                epsilon_decay_rate=epsilon_decay_rate,
+                epsilon_decay_rate=epsilon_decay_rate, accelerated=accelerated,
                 seed=None if seed is None else seed + trial,
             )
             evaluation_return.append(agent.evaluation_return.copy())

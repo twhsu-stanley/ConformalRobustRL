@@ -171,7 +171,10 @@ class ConformallyRobustController:
                 print(
                     f"Episode {record['episode']}: "
                     f"R={record['R_used']:.3f}, C={record['C_used']:.3f}, "
-                    f"steps={record['episode_length']}, goal={record['goal_reached']}",
+                    f"steps={record['episode_length']}, goal={record['goal_reached']}, "
+                    f"Q-learning converged={record['training']['converged']}"
+                    f"{' (policy reused)' if record['training_reused'] else ''}",
+                    flush=True,
                 )
         return records
 
